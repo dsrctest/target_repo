@@ -4,6 +4,10 @@ on:
   pull_request:
     types: [opened, closed]
 
+permissions:
+  contents: write
+  pull-requests: write
+
 jobs:
   pr-opened:
     if: github.event.action == 'opened'
@@ -16,7 +20,7 @@ jobs:
     
     - name: Comment on PR
       env:
-        GH_TOKEN: ${{ github.token }}
+        GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       run: |
         gh pr comment ${{ github.event.pull_request.number }} \
           --body "✅ PR received! This will be converted to a submodule when merged."
