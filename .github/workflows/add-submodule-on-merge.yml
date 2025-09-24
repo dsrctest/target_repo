@@ -6,6 +6,7 @@ on:
 permissions:
   contents: write
   pull-requests: write
+  repository-projects: write
 
 jobs:
   # Job 1: Create branch and submodule when PR is opened
