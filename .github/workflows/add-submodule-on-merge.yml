@@ -1,10 +1,11 @@
-name: Add submodule after PR merge
+name: Add Submodule After PR Merge
 on:
   pull_request:
     types: [closed]
 permissions:
   contents: write
   pull-requests: write
+
 jobs:
   add-submodule:
     if: github.event.pull_request.merged == true
@@ -12,35 +13,36 @@ jobs:
     env:
       BASE_BRANCH: main
     steps:
-      - name: Debug Event Context
+      - name: Comprehensive Debugging
         run: |
-          echo "Workflow triggered by PR merge"
+          echo "Workflow Triggered Details:"
           echo "PR Number: ${{ github.event.pull_request.number }}"
-          echo "Merged by: ${{ github.event.pull_request.merged_by.login }}"
+          echo "Merged By: ${{ github.event.pull_request.merged_by.login }}"
+          echo "Repository: ${{ github.repository }}"
 
-      - name: Checkout target repo
+      - name: Checkout Target Repository
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
           token: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Extract metadata from PR body
+      - name: Extract Metadata from PR Body
         id: meta
         run: |
           BODY=$(jq -r '.pull_request.body' "$GITHUB_EVENT_PATH")
           
-          # Enhanced extraction with trim and error handling
-          NAME=$(echo "$BODY" | sed -n 's/^Submodule-Name:[[:space:]]*//p' | head -1 | xargs)
-          ORG=$(echo "$BODY" | sed -n 's/^Submodule-Org:[[:space:]]*//p' | head -1 | xargs)
+          # Enhanced extraction with robust parsing
+          NAME=$(echo "$BODY" | grep -i "Submodule-Name:" | cut -d':' -f2 | xargs)
+          ORG=$(echo "$BODY" | grep -i "Submodule-Org:" | cut -d':' -f2 | xargs)
           
           # Validate extracted values
           if [ -z "$NAME" ]; then
-            echo "Error: Submodule-Name not found in PR body"
+            echo "Error: Submodule Name not found"
             exit 1
           fi
           
           if [ -z "$ORG" ]; then
-            echo "Error: Submodule-Org not found in PR body"
+            echo "Error: Organization not found"
             exit 1
           fi
           
@@ -49,39 +51,41 @@ jobs:
           echo "Extracted Organization: $ORG"
           
           echo "name=$NAME" >> $GITHUB_OUTPUT
-          echo "org=$ORG"   >> $GITHUB_OUTPUT
+          echo "org=$ORG" >> $GITHUB_OUTPUT
           echo "repo=${ORG}/${NAME}-source" >> $GITHUB_OUTPUT
 
-      - name: Configure git
+      - name: Validate GitHub Token Permissions
+        env:
+          GH_TOKEN: ${{ secrets.ORG_ADMIN_TOKEN }}
+        run: |
+          # Comprehensive token validation
+          gh auth status
+          gh api user
+          gh api user/orgs
+
+      - name: Configure Git
         run: |
           git config --global user.name "${{ github.actor }}"
           git config --global user.email "${{ github.actor }}@users.noreply.github.com"
           git config --global init.defaultBranch main
 
-      - name: Create working branch
+      - name: Create Working Branch
         id: branch
         run: |
           TIMESTAMP=$(date +"%Y%m%d%H%M%S")
-          BR="add-submodule-${{ steps.meta.outputs.name }}-${TIMESTAMP}"
-          git checkout -b "$BR"
-          echo "branch=$BR" >> $GITHUB_OUTPUT
-          echo "Created working branch: $BR"
+          BRANCH_NAME="add-submodule-${{ steps.meta.outputs.name }}-${TIMESTAMP}"
+          git checkout -b "$BRANCH_NAME"
+          echo "branch=$BRANCH_NAME" >> $GITHUB_OUTPUT
+          echo "Created working branch: $BRANCH_NAME"
 
-      - name: Validate GitHub Token
+      - name: Create Organization Repository
         env:
-          GH_TOKEN: ${{ secrets.ORG_ADMIN_TOKEN || github.token }}
-        run: |
-          gh auth status
-          gh api user
-
-      - name: Create org repo if needed
-        env:
-          GH_TOKEN: ${{ secrets.ORG_ADMIN_TOKEN || github.token }}
+          GH_TOKEN: ${{ secrets.ORG_ADMIN_TOKEN }}
         run: |
           set -x
           REPO="${{ steps.meta.outputs.repo }}"
           
-          # Comprehensive repo creation logic
+          # Detailed repository creation logic
           if gh repo view "$REPO" >/dev/null 2>&1; then
             echo "Repository $REPO already exists"
           else
@@ -90,12 +94,15 @@ jobs:
               --private \
               --description "Source repository for ${{ steps.meta.outputs.name }}" \
               || {
-                echo "Failed to create repository"
+                echo "Repository Creation Failed"
+                echo "Debugging Repository Creation:"
+                gh api user/orgs
+                gh api org/dsrctest/repos
                 exit 1
               }
           fi
 
-      - name: Split folder history and push to org repo
+      - name: Split Folder History
         env:
           GH_TOKEN: ${{ secrets.ORG_ADMIN_TOKEN }}
         run: |
@@ -106,7 +113,7 @@ jobs:
           if git subtree split --prefix="$FOLDER" -b tmp/split; then
             git push --force "$REPO_URL" tmp/split:main
           else
-            # Fallback method if subtree split fails
+            # Fallback method for folder without git history
             TMPDIR=$(mktemp -d)
             cp -r "$FOLDER" "$TMPDIR/repo"
             cd "$TMPDIR/repo"
@@ -116,14 +123,14 @@ jobs:
             git config user.email "${{ github.actor }}@users.noreply.github.com"
             
             git add .
-            git commit -m "Initial commit for $FOLDER-source"
+            git commit -m "Initial commit for $FOLDER source"
             git branch -M main
             
             git remote add origin "$REPO_URL"
             git push -u origin main
           fi
 
-      - name: Replace folder with submodule
+      - name: Replace Folder with Submodule
         run: |
           NAME="${{ steps.meta.outputs.name }}"
           URL="https://github.com/${{ steps.meta.outputs.repo }}.git"
@@ -137,15 +144,22 @@ jobs:
           git add .gitmodules "$NAME"
           git commit -m "Replace $NAME with submodule" || echo "No changes to commit"
 
-      - name: Push branch
+      - name: Push Working Branch
         run: git push -u origin "${{ steps.branch.outputs.branch }}"
 
-      - name: Create follow-up PR
+      - name: Create Follow-up Pull Request
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           gh pr create \
             --base "${{ env.BASE_BRANCH }}" \
             --head "${{ steps.branch.outputs.branch }}" \
-            --title "Add submodule ${{ steps.meta.outputs.name }}" \
+            --title "Add Submodule: ${{ steps.meta.outputs.name }}" \
             --body "Converted folder to submodule: https://github.com/${{ steps.meta.outputs.repo }}"
+
+      - name: Final Workflow Logging
+        if: always()
+        run: |
+          echo "Workflow Completed"
+          echo "Submodule Name: ${{ steps.meta.outputs.name }}"
+          echo "Target Repository: ${{ steps.meta.outputs.repo }}"
