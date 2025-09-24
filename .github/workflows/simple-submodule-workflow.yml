@@ -92,10 +92,10 @@ jobs:
         
         # Create temporary directory
         TMPDIR=$(mktemp -d)
-        
-        # Initialize new git repository in temp directory
         cd "$TMPDIR"
-        git init repo
+        
+        # Clone the repository using GitHub CLI
+        gh repo clone "$NEW_REPO" repo
         cd repo
         
         # Copy folder content from the original repository
@@ -109,20 +109,8 @@ jobs:
         git add .
         git commit -m "Add $FOLDER source content"
         
-        # Rename branch to main
-        git branch -M main
-        
-        # Use GitHub CLI to push (more reliable for authentication)
-        cd "$TMPDIR"
-        gh repo clone "$NEW_REPO" existing-repo
-        cd existing-repo
-        
-        # Copy content to existing repo
-        cp -r ../repo/* .
-        
-        # Commit and push
-        git add .
-        git commit -m "Add $FOLDER source content" || echo "No changes to commit"
+        # Use GitHub CLI to push (more reliable)
+        gh auth setup-git
         git push origin main
         
         echo "Successfully pushed content to $NEW_REPO"
@@ -144,6 +132,11 @@ jobs:
         git commit -m "Convert $FOLDER to submodule from $NEW_REPO"
 
     - name: Push changes
+      env:
+        GH_TOKEN: ${{ secrets.ORG_ADMIN_TOKEN || github.token }}
       run: |
+        # Use GitHub CLI for authentication
+        gh auth setup-git
+        
         git push origin main
         echo "Successfully converted ${{ steps.meta.outputs.folder_name }} to submodule"
