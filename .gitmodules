@@ -1,3 +1,6 @@
 [submodule "deepcraft44"]
 	path = deepcraft44
 	url = https://github.com/dsrctest/deepcraft44-source.git
+[submodule "deepcraft46"]
+	path = deepcraft46
+	url = https://github.com/dsrctest/deepcraft46-source.git
