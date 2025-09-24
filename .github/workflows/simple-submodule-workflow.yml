@@ -112,9 +112,18 @@ jobs:
         # Rename branch to main
         git branch -M main
         
-        # Add remote and push
-        git remote add origin "https://github.com/$NEW_REPO.git"
-        git push -u origin main
+        # Use GitHub CLI to push (more reliable for authentication)
+        cd "$TMPDIR"
+        gh repo clone "$NEW_REPO" existing-repo
+        cd existing-repo
+        
+        # Copy content to existing repo
+        cp -r ../repo/* .
+        
+        # Commit and push
+        git add .
+        git commit -m "Add $FOLDER source content" || echo "No changes to commit"
+        git push origin main
         
         echo "Successfully pushed content to $NEW_REPO"
 
