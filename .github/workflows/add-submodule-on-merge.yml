@@ -45,7 +45,7 @@ jobs:
 
       - name: Create org repo if needed (PAT)
         env:
-          GH_TOKEN: ${{ secrets.ORG_ADMIN_TOKEN }}
+          GH_TOKEN: ${{ secrets.ORG_ADMIN_TOKEN || github.token }}
         run: |
           set -x
           # Check if repository exists
