@@ -1,4 +1,4 @@
-﻿name: Add submodule after PR merge
+name: Add submodule after PR merge
 on:
   pull_request:
     types: [closed]
