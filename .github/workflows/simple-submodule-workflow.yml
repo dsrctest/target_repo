@@ -92,14 +92,14 @@ jobs:
         
         # Create temporary directory
         TMPDIR=$(mktemp -d)
-        cd "$TMPDIR"
         
-        # Initialize new git repository
+        # Initialize new git repository in temp directory
+        cd "$TMPDIR"
         git init repo
         cd repo
         
-        # Copy folder content
-        cp -r "../../$FOLDER"/* .
+        # Copy folder content from the original repository
+        cp -r "$GITHUB_WORKSPACE/$FOLDER"/* .
         
         # Configure git
         git config user.name "${{ github.actor }}"
