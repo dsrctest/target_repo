@@ -1,45 +1,115 @@
-name: PR Submodule Creation Workflow
+name: Submodule Creation Workflow
 
 on:
   pull_request:
-    types: [closed]
+    types: 
+      - closed
+
+permissions:
+  contents: write
+  pull-requests: read
 
 jobs:
   create-submodule:
-    # Only run if the PR is merged
+    # Only run if PR is merged
     if: github.event.pull_request.merged == true
     runs-on: ubuntu-latest
     
     steps:
-    - name: Checkout main repository
+    - name: Debug Event Information
+      run: |
+        echo "PR Number: ${{ github.event.pull_request.number }}"
+        echo "PR Merged: ${{ github.event.pull_request.merged }}"
+        echo "Repository: ${{ github.repository }}"
+
+    - name: Checkout Repository
       uses: actions/checkout@v3
       with:
+        token: ${{ secrets.GITHUB_TOKEN }}
         fetch-depth: 0
         submodules: recursive
 
-    - name: Set up Git
+    - name: Set up Git Configuration
       run: |
         git config --global user.name 'GitHub Action'
         git config --global user.email 'action@github.com'
 
-    - name: Create Submodule
+    - name: Validate Repository Access
       env:
-        GITHUB_TOKEN: ${{ secrets.ORGANIZATION_REPO_TOKEN }}
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      run: |
+        # Check repository access
+        gh repo view ${{ github.repository }} || exit 1
+
+    - name: Create Submodule Process
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         TARGET_REPO: https://github.com/dsrctest/target_repo.git
         ORGANIZATION_URL: https://github.com/your-organization
       run: |
-        # Clone the target repository
-        git clone $TARGET_REPO temp_submodule
+        # Debugging: Print environment variables
+        echo "Target Repository: $TARGET_REPO"
+        echo "Organization URL: $ORGANIZATION_URL"
 
-        # Create .gitmodules file
-        echo "[submodule \"target_repo\"]" > .gitmodules
-        echo "    path = target_repo" >> .gitmodules
-        echo "    url = $ORGANIZATION_URL/target_repo.git" >> .gitmodules
+        # Step 1: Clone target repository
+        git clone $TARGET_REPO temp_submodule || {
+          echo "Failed to clone target repository"
+          exit 1
+        }
 
-        # Add submodule
-        git submodule add $TARGET_REPO target_repo
+        # Step 2: Create .gitmodules file
+        cat > .gitmodules << EOL
+        [submodule "target_repo"]
+            path = target_repo
+            url = $ORGANIZATION_URL/target_repo.git
+        EOL
 
-        # Push changes to the main repository
+        # Step 3: Add submodule
+        git submodule add $TARGET_REPO target_repo || {
+          echo "Failed to add submodule"
+          exit 1
+        }
+
+        # Step 4: Commit and push changes
         git add .gitmodules target_repo
-        git commit -m "Add target_repo as submodule"
-        git push origin HEAD:main
+        git commit -m "Add target_repo as submodule from PR #${{ github.event.pull_request.number }}" || {
+          echo "No changes to commit"
+          exit 0
+        }
+
+        # Step 5: Push to main branch
+        git push origin HEAD:main || {
+          echo "Failed to push changes"
+          exit 1
+        }
+
+    - name: Submodule Verification
+      run: |
+        # Verify submodule initialization
+        git submodule status
+        git submodule update --init --recursive
+
+    - name: Error Handling and Logging
+      if: failure()
+      uses: actions/github-script@v6
+      with:
+        github-token: ${{secrets.GITHUB_TOKEN}}
+        script: |
+          core.setFailed('Submodule creation workflow failed')
+
+  notify:
+    needs: create-submodule
+    if: failure()
+    runs-on: ubuntu-latest
+    steps:
+    - name: Notify Failure
+      uses: actions/github-script@v6
+      with:
+        github-token: ${{secrets.GITHUB_TOKEN}}
+        script: |
+          github.rest.issues.create({
+            owner: context.repo.owner,
+            repo: context.repo.repo,
+            title: 'Submodule Creation Workflow Failed',
+            body: 'The submodule creation workflow for PR #${{ github.event.pull_request.number }} failed. Please investigate.'
+          })
