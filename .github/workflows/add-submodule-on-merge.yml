@@ -1,0 +1,102 @@
+﻿name: Add submodule after PR merge
+
+on:
+  pull_request:
+    types: [closed]
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  add-submodule:
+    if: github.event.pull_request.merged == true
+    runs-on: ubuntu-latest
+    env:
+      ORG_ADMIN_TOKEN: ${{ secrets.ORG_ADMIN_TOKEN }}
+      BASE_BRANCH: main
+    steps:
+      - name: Checkout target repo
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Extract metadata from PR body
+        id: meta
+        run: |
+          BODY=$(jq -r '.pull_request.body' "$GITHUB_EVENT_PATH")
+          NAME=$(echo "$BODY" | sed -n 's/^Submodule-Name:[[:space:]]*//p' | head -1)
+          ORG=$(echo "$BODY"  | sed -n 's/^Submodule-Org:[[:space:]]*//p'   | head -1)
+          if [ -z "$NAME" ] || [ -z "$ORG" ]; then
+            echo "Missing Submodule-Name or Submodule-Org in PR body"; exit 1
+          fi
+          echo "name=$NAME" >> $GITHUB_OUTPUT
+          echo "org=$ORG"   >> $GITHUB_OUTPUT
+          echo "repo=${ORG}/${NAME}-source" >> $GITHUB_OUTPUT
+
+      - name: Configure git
+        run: |
+          git config user.name  "${{ github.actor }}"
+          git config user.email "${{ github.actor }}@users.noreply.github.com"
+
+      - name: Create working branch
+        id: branch
+        run: |
+          BR="add-submodule-${{ steps.meta.outputs.name }}-${{ github.run_number }}"
+          git checkout -b "$BR"
+          echo "branch=$BR" >> $GITHUB_OUTPUT
+
+      - name: Create org repo if needed (PAT)
+        env:
+          GH_TOKEN: ${{ env.ORG_ADMIN_TOKEN }}
+        run: |
+          gh repo view "${{ steps.meta.outputs.repo }}" >/dev/null 2>&1 || \
+          gh repo create "${{ steps.meta.outputs.repo }}" --private -y
+
+      - name: Split folder history and push to org repo (PAT)
+        env:
+          GH_TOKEN: ${{ env.ORG_ADMIN_TOKEN }}
+        run: |
+          FOLDER="${{ steps.meta.outputs.name }}"
+          git subtree split --prefix="$FOLDER" -b tmp/split || true
+          if git rev-parse --verify tmp/split >/dev/null 2>&1; then
+            git push --force "https://github.com/${{ steps.meta.outputs.repo }}.git" tmp/split:main
+          else
+            TMPDIR=$(mktemp -d)
+            cp -r "$FOLDER" "$TMPDIR/repo"
+            cd "$TMPDIR/repo"
+            git init
+            git config user.name  "${{ github.actor }}"
+            git config user.email "${{ github.actor }}@users.noreply.github.com"
+            git add .
+            git commit -m "Initial commit for $FOLDER-source"
+            git branch -M main
+            git remote add origin "https://github.com/${{ steps.meta.outputs.repo }}.git"
+            git push -u origin main
+          fi
+
+      - name: Replace folder with submodule
+        run: |
+          NAME="${{ steps.meta.outputs.name }}"
+          URL="https://github.com/${{ steps.meta.outputs.repo }}.git"
+          if [ -d "$NAME/.git" ] || [ -e "$NAME" ]; then
+            git submodule deinit -f "$NAME" || true
+            git rm -rf "$NAME" || true
+            rm -rf ".git/modules/$NAME" || true
+          fi
+          git submodule add "$URL" "$NAME"
+          git add .gitmodules "$NAME"
+          git commit -m "Replace $NAME with submodule" || echo "No changes to commit"
+
+      - name: Push branch
+        run: git push -u origin "${{ steps.branch.outputs.branch }}"
+
+      - name: Create follow-up PR
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh pr create \
+            --base "${{ env.BASE_BRANCH }}" \
+            --head "${{ steps.branch.outputs.branch }}" \
+            --title "Add submodule ${{ steps.meta.outputs.name }}" \
+            --body "Converted folder to submodule: https://github.com/${{ steps.meta.outputs.repo }}"
