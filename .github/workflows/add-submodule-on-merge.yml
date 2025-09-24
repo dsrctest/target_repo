@@ -1,4 +1,4 @@
-﻿name: Add submodule after PR merge
+name: Add submodule after PR merge
 
 on:
   pull_request:
@@ -48,14 +48,14 @@ jobs:
 
       - name: Create org repo if needed (PAT)
         env:
-          GH_TOKEN: ${{ env.ORG_ADMIN_TOKEN }}
+          GH_TOKEN: ${{ secrets.ORG_ADMIN_TOKEN }}
         run: |
           gh repo view "${{ steps.meta.outputs.repo }}" >/dev/null 2>&1 || \
-          gh repo create "${{ steps.meta.outputs.repo }}" --private -y
+          gh repo create "${{ steps.meta.outputs.repo }}" --private --confirm
 
       - name: Split folder history and push to org repo (PAT)
         env:
-          GH_TOKEN: ${{ env.ORG_ADMIN_TOKEN }}
+          GH_TOKEN: ${{ secrets.ORG_ADMIN_TOKEN }}
         run: |
           FOLDER="${{ steps.meta.outputs.name }}"
           git subtree split --prefix="$FOLDER" -b tmp/split || true
