@@ -2,12 +2,12 @@ name: Submodule Creation Workflow
 
 on:
   pull_request:
-    types: 
-      - closed
+    types: [closed]
 
 permissions:
   contents: write
-  pull-requests: read
+  pull-requests: write
+  repository-projects: write
 
 jobs:
   create-submodule:
@@ -16,100 +16,116 @@ jobs:
     runs-on: ubuntu-latest
     
     steps:
-    - name: Debug Event Information
-      run: |
-        echo "PR Number: ${{ github.event.pull_request.number }}"
-        echo "PR Merged: ${{ github.event.pull_request.merged }}"
-        echo "Repository: ${{ github.repository }}"
-
     - name: Checkout Repository
-      uses: actions/checkout@v3
+      uses: actions/checkout@v4
       with:
-        token: ${{ secrets.GITHUB_TOKEN }}
         fetch-depth: 0
-        submodules: recursive
+        token: ${{ secrets.ORG_ADMIN_TOKEN }}
 
-    - name: Set up Git Configuration
+    - name: Extract Metadata
+      id: extract-metadata
       run: |
-        git config --global user.name 'GitHub Action'
-        git config --global user.email 'action@github.com'
+        # Extract submodule name and organization from PR body or use a default naming convention
+        SUBMODULE_NAME=$(echo "${{ github.event.pull_request.title }}" | tr '[:upper:]' '[:lower:]' | sed 's/[^a-z0-9]/-/g')
+        ORG_NAME="dsrctest"  # Your organization name
+        
+        echo "submodule_name=${SUBMODULE_NAME}" >> $GITHUB_OUTPUT
+        echo "org_name=${ORG_NAME}" >> $GITHUB_OUTPUT
+        echo "repo_name=${ORG_NAME}/${SUBMODULE_NAME}-source" >> $GITHUB_OUTPUT
 
-    - name: Validate Repository Access
+    - name: Create Organization Repository
       env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        GH_TOKEN: ${{ secrets.ORG_ADMIN_TOKEN }}
       run: |
-        # Check repository access
-        gh repo view ${{ github.repository }} || exit 1
+        # Create repository in the organization
+        REPO_NAME="${{ steps.extract-metadata.outputs.submodule_name }}-source"
+        
+        # Check if repository already exists
+        if ! gh repo view "${{ steps.extract-metadata.outputs.org_name }}/$REPO_NAME" >/dev/null 2>&1; then
+          # Create new repository in the organization
+          gh repo create "$REPO_NAME" \
+            --org "${{ steps.extract-metadata.outputs.org_name }}" \
+            --private \
+            --description "Source repository for ${{ steps.extract-metadata.outputs.submodule_name }}"
+        else
+          echo "Repository already exists"
+        fi
 
-    - name: Create Submodule Process
+    - name: Prepare Repository Content
+      run: |
+        # Create a temporary directory for repository preparation
+        TEMP_DIR=$(mktemp -d)
+        SUBMODULE_NAME="${{ steps.extract-metadata.outputs.submodule_name }}"
+        
+        # Copy relevant files/folders to temp directory
+        cp -r "$SUBMODULE_NAME"/* "$TEMP_DIR/"
+        
+        # Create a README if no files exist
+        if [ -z "$(ls -A "$TEMP_DIR")" ]; then
+          echo "# $SUBMODULE_NAME Source Repository" > "$TEMP_DIR/README.md"
+        fi
+
+    - name: Push Content to Organization Repository
       env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        TARGET_REPO: https://github.com/dsrctest/target_repo.git
-        ORGANIZATION_URL: https://github.com/your-organization
+        GH_TOKEN: ${{ secrets.ORG_ADMIN_TOKEN }}
       run: |
-        # Debugging: Print environment variables
-        echo "Target Repository: $TARGET_REPO"
-        echo "Organization URL: $ORGANIZATION_URL"
+        # Clone the newly created repository
+        REPO_URL="https://github.com/${{ steps.extract-metadata.outputs.org_name }}/${{ steps.extract-metadata.outputs.submodule_name }}-source.git"
+        TEMP_DIR=$(mktemp -d)
+        
+        # Clone the repository
+        git clone "$REPO_URL" "$TEMP_DIR"
+        
+        # Copy prepared content
+        cp -r "${{ steps.extract-metadata.outputs.submodule_name }}"/* "$TEMP_DIR/"
+        
+        # Configure git
+        cd "$TEMP_DIR"
+        git config user.name "GitHub Action"
+        git config user.email "action@github.com"
+        
+        # Add and commit content
+        git add .
+        git commit -m "Initial commit: Add source content for ${{ steps.extract-metadata.outputs.submodule_name }}"
+        git push origin main
 
-        # Step 1: Clone target repository
-        git clone $TARGET_REPO temp_submodule || {
-          echo "Failed to clone target repository"
-          exit 1
-        }
-
-        # Step 2: Create .gitmodules file
-        cat > .gitmodules << EOL
-        [submodule "target_repo"]
-            path = target_repo
-            url = $ORGANIZATION_URL/target_repo.git
-        EOL
-
-        # Step 3: Add submodule
-        git submodule add $TARGET_REPO target_repo || {
-          echo "Failed to add submodule"
-          exit 1
-        }
-
-        # Step 4: Commit and push changes
-        git add .gitmodules target_repo
-        git commit -m "Add target_repo as submodule from PR #${{ github.event.pull_request.number }}" || {
-          echo "No changes to commit"
-          exit 0
-        }
-
-        # Step 5: Push to main branch
-        git push origin HEAD:main || {
-          echo "Failed to push changes"
-          exit 1
-        }
-
-    - name: Submodule Verification
+    - name: Convert to Submodule
       run: |
-        # Verify submodule initialization
-        git submodule status
-        git submodule update --init --recursive
+        # Create a new branch for submodule conversion
+        BRANCH_NAME="submodule-conversion-$(date +%Y%m%d%H%M%S)"
+        git checkout -b "$BRANCH_NAME"
+        
+        # Remove existing folder
+        SUBMODULE_NAME="${{ steps.extract-metadata.outputs.submodule_name }}"
+        git rm -rf "$SUBMODULE_NAME"
+        
+        # Add as submodule
+        REPO_URL="https://github.com/${{ steps.extract-metadata.outputs.org_name }}/$SUBMODULE_NAME-source.git"
+        git submodule add "$REPO_URL" "$SUBMODULE_NAME"
+        
+        # Commit submodule changes
+        git add .gitmodules "$SUBMODULE_NAME"
+        git commit -m "Convert $SUBMODULE_NAME to submodule"
+        
+        # Push the branch
+        git push -u origin "$BRANCH_NAME"
 
-    - name: Error Handling and Logging
+    - name: Create Pull Request for Submodule Merge
+      env:
+        GH_TOKEN: ${{ secrets.ORG_ADMIN_TOKEN }}
+      run: |
+        # Create a PR to merge submodule conversion branch
+        BRANCH_NAME="submodule-conversion-$(date +%Y%m%d%H%M%S)"
+        gh pr create \
+          --base main \
+          --head "$BRANCH_NAME" \
+          --title "Convert ${{ steps.extract-metadata.outputs.submodule_name }} to Submodule" \
+          --body "Automated PR to convert ${{ steps.extract-metadata.outputs.submodule_name }} to a submodule"
+
+    - name: Error Handling
       if: failure()
       uses: actions/github-script@v6
       with:
-        github-token: ${{secrets.GITHUB_TOKEN}}
+        github-token: ${{secrets.ORG_ADMIN_TOKEN}}
         script: |
           core.setFailed('Submodule creation workflow failed')
-
-  notify:
-    needs: create-submodule
-    if: failure()
-    runs-on: ubuntu-latest
-    steps:
-    - name: Notify Failure
-      uses: actions/github-script@v6
-      with:
-        github-token: ${{secrets.GITHUB_TOKEN}}
-        script: |
-          github.rest.issues.create({
-            owner: context.repo.owner,
-            repo: context.repo.repo,
-            title: 'Submodule Creation Workflow Failed',
-            body: 'The submodule creation workflow for PR #${{ github.event.pull_request.number }} failed. Please investigate.'
-          })
