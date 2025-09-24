@@ -1,8 +1,7 @@
-name: Submodule Creation Workflow
-
+name: PR Submodule Workflow
 on:
   pull_request:
-    types: [closed]
+    types: [opened, closed]
 
 permissions:
   contents: write
@@ -10,122 +9,239 @@ permissions:
   repository-projects: write
 
 jobs:
-  create-submodule:
-    # Only run if PR is merged
-    if: github.event.pull_request.merged == true
+  # Job 1: When PR is opened - just comment (no action needed)
+  pr-opened:
+    if: github.event.action == 'opened'
     runs-on: ubuntu-latest
-    
     steps:
-    - name: Checkout Repository
-      uses: actions/checkout@v4
-      with:
-        fetch-depth: 0
-        token: ${{ secrets.ORG_ADMIN_TOKEN }}
+      - name: Extract metadata from PR body
+        id: meta
+        run: |
+          BODY=$(jq -r '.pull_request.body' "$GITHUB_EVENT_PATH")
+          NAME=$(echo "$BODY" | sed -n 's/^Submodule-Name:[[:space:]]*//p' | head -1)
+          ORG=$(echo "$BODY"  | sed -n 's/^Submodule-Org:[[:space:]]*//p'   | head -1)
+          if [ -z "$NAME" ] || [ -z "$ORG" ]; then
+            echo "Missing Submodule-Name or Submodule-Org in PR body"; exit 1
+          fi
+          echo "name=$NAME" >> $GITHUB_OUTPUT
+          echo "org=$ORG"   >> $GITHUB_OUTPUT
+          echo "repo=${ORG}/${NAME}-source" >> $GITHUB_OUTPUT
 
-    - name: Extract Metadata
-      id: extract-metadata
-      run: |
-        # Extract submodule name and organization from PR body or use a default naming convention
-        SUBMODULE_NAME=$(echo "${{ github.event.pull_request.title }}" | tr '[:upper:]' '[:lower:]' | sed 's/[^a-z0-9]/-/g')
-        ORG_NAME="dsrctest"  # Your organization name
-        
-        echo "submodule_name=${SUBMODULE_NAME}" >> $GITHUB_OUTPUT
-        echo "org_name=${ORG_NAME}" >> $GITHUB_OUTPUT
-        echo "repo_name=${ORG_NAME}/${SUBMODULE_NAME}-source" >> $GITHUB_OUTPUT
+      - name: Comment on PR
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh pr comment ${{ github.event.pull_request.number }} \
+            --body "✅ PR received for ${{ steps.meta.outputs.name }}
+          
+          📁 This PR contains the folder content that will be converted to a submodule after merge.
+          
+          🔄 When this PR is merged, the workflow will:
+          1. Create organization repository: ${{ steps.meta.outputs.repo }}
+          2. Push folder content to the new repository
+          3. Convert the folder to a submodule pointing to the new repository"
 
-    - name: Create Organization Repository
-      env:
-        GH_TOKEN: ${{ secrets.ORG_ADMIN_TOKEN }}
-      run: |
-        # Create repository in the organization
-        REPO_NAME="${{ steps.extract-metadata.outputs.submodule_name }}-source"
-        
-        # Check if repository already exists
-        if ! gh repo view "${{ steps.extract-metadata.outputs.org_name }}/$REPO_NAME" >/dev/null 2>&1; then
-          # Create new repository in the organization
-          gh repo create "$REPO_NAME" \
-            --org "${{ steps.extract-metadata.outputs.org_name }}" \
-            --private \
-            --description "Source repository for ${{ steps.extract-metadata.outputs.submodule_name }}"
-        else
-          echo "Repository already exists"
-        fi
+  # Job 2: When PR is merged - create repository and convert to submodule
+  convert-to-submodule-on-merge:
+    if: github.event.action == 'closed' && github.event.pull_request.merged == true
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
 
-    - name: Prepare Repository Content
-      run: |
-        # Create a temporary directory for repository preparation
-        TEMP_DIR=$(mktemp -d)
-        SUBMODULE_NAME="${{ steps.extract-metadata.outputs.submodule_name }}"
-        
-        # Copy relevant files/folders to temp directory
-        cp -r "$SUBMODULE_NAME"/* "$TEMP_DIR/"
-        
-        # Create a README if no files exist
-        if [ -z "$(ls -A "$TEMP_DIR")" ]; then
-          echo "# $SUBMODULE_NAME Source Repository" > "$TEMP_DIR/README.md"
-        fi
+      - name: Extract metadata from PR body
+        id: meta
+        run: |
+          BODY=$(jq -r '.pull_request.body' "$GITHUB_EVENT_PATH")
+          NAME=$(echo "$BODY" | sed -n 's/^Submodule-Name:[[:space:]]*//p' | head -1)
+          ORG=$(echo "$BODY"  | sed -n 's/^Submodule-Org:[[:space:]]*//p'   | head -1)
+          if [ -z "$NAME" ] || [ -z "$ORG" ]; then
+            echo "Missing Submodule-Name or Submodule-Org in PR body"; exit 1
+          fi
+          echo "name=$NAME" >> $GITHUB_OUTPUT
+          echo "org=$ORG"   >> $GITHUB_OUTPUT
+          echo "repo=${ORG}/${NAME}-source" >> $GITHUB_OUTPUT
 
-    - name: Push Content to Organization Repository
-      env:
-        GH_TOKEN: ${{ secrets.ORG_ADMIN_TOKEN }}
-      run: |
-        # Clone the newly created repository
-        REPO_URL="https://github.com/${{ steps.extract-metadata.outputs.org_name }}/${{ steps.extract-metadata.outputs.submodule_name }}-source.git"
-        TEMP_DIR=$(mktemp -d)
-        
-        # Clone the repository
-        git clone "$REPO_URL" "$TEMP_DIR"
-        
-        # Copy prepared content
-        cp -r "${{ steps.extract-metadata.outputs.submodule_name }}"/* "$TEMP_DIR/"
-        
-        # Configure git
-        cd "$TEMP_DIR"
-        git config user.name "GitHub Action"
-        git config user.email "action@github.com"
-        
-        # Add and commit content
-        git add .
-        git commit -m "Initial commit: Add source content for ${{ steps.extract-metadata.outputs.submodule_name }}"
-        git push origin main
+      - name: Configure git
+        run: |
+          git config user.name  "${{ github.actor }}"
+          git config user.email "${{ github.actor }}@users.noreply.github.com"
 
-    - name: Convert to Submodule
-      run: |
-        # Create a new branch for submodule conversion
-        BRANCH_NAME="submodule-conversion-$(date +%Y%m%d%H%M%S)"
-        git checkout -b "$BRANCH_NAME"
-        
-        # Remove existing folder
-        SUBMODULE_NAME="${{ steps.extract-metadata.outputs.submodule_name }}"
-        git rm -rf "$SUBMODULE_NAME"
-        
-        # Add as submodule
-        REPO_URL="https://github.com/${{ steps.extract-metadata.outputs.org_name }}/$SUBMODULE_NAME-source.git"
-        git submodule add "$REPO_URL" "$SUBMODULE_NAME"
-        
-        # Commit submodule changes
-        git add .gitmodules "$SUBMODULE_NAME"
-        git commit -m "Convert $SUBMODULE_NAME to submodule"
-        
-        # Push the branch
-        git push -u origin "$BRANCH_NAME"
+      - name: Create working branch for submodule conversion
+        id: branch
+        run: |
+          BRANCH_NAME="submodule-${NAME}-$(date +%Y%m%d%H%M%S)"
+          git checkout -b "$BRANCH_NAME"
+          echo "branch=$BRANCH_NAME" >> $GITHUB_OUTPUT
+          echo "Created branch: $BRANCH_NAME"
 
-    - name: Create Pull Request for Submodule Merge
-      env:
-        GH_TOKEN: ${{ secrets.ORG_ADMIN_TOKEN }}
-      run: |
-        # Create a PR to merge submodule conversion branch
-        BRANCH_NAME="submodule-conversion-$(date +%Y%m%d%H%M%S)"
-        gh pr create \
-          --base main \
-          --head "$BRANCH_NAME" \
-          --title "Convert ${{ steps.extract-metadata.outputs.submodule_name }} to Submodule" \
-          --body "Automated PR to convert ${{ steps.extract-metadata.outputs.submodule_name }} to a submodule"
+      - name: Create Organization Repository
+        env:
+          GH_TOKEN: ${{ secrets.ORG_ADMIN_TOKEN || github.token }}
+        run: |
+          set -x
+          REPO="${{ steps.meta.outputs.repo }}"
+          
+          # Check if folder exists
+          if [ ! -d "${{ steps.meta.outputs.name }}" ]; then
+            echo "Error: Folder ${{ steps.meta.outputs.name }} does not exist"
+            exit 1
+          fi
+          
+          # Create repository if it doesn't exist
+          if ! gh repo view "$REPO" >/dev/null 2>&1; then
+            echo "Creating repository: $REPO"
+            if ! gh repo create "$REPO" \
+              --private \
+              --description "Source repository for ${{ steps.meta.outputs.name }}" \
+              --confirm; then
+              echo "Failed to create repository: $REPO"
+              echo "Debugging information:"
+              echo "Current user: $(gh api user --jq '.login')"
+              echo "Organization access: $(gh api org/dsrctest --jq '.login' || echo 'No access')"
+              echo "Available repositories in org:"
+              gh api org/dsrctest/repos --jq '.[].name' || echo "Cannot list org repos"
+              exit 1
+            fi
+            echo "Successfully created repository: $REPO"
+            
+            # Initialize the repository with an initial commit
+            echo "Initializing repository with initial commit..."
+            TMPDIR=$(mktemp -d)
+            cd "$TMPDIR"
+            
+            # Clone the empty repository
+            git clone "https://github.com/$REPO.git" repo
+            cd repo
+            
+            # Create initial README
+            echo "# ${{ steps.meta.outputs.name }} Source Repository" > README.md
+            echo "" >> README.md
+            echo "This repository contains the source code for ${{ steps.meta.outputs.name }}." >> README.md
+            echo "" >> README.md
+            echo "## About" >> README.md
+            echo "This repository was automatically created by GitHub Actions workflow." >> README.md
+            
+            # Configure git
+            git config user.name "${{ github.actor }}"
+            git config user.email "${{ github.actor }}@users.noreply.github.com"
+            
+            # Create initial commit
+            git add README.md
+            git commit -m "Initial commit: Add README"
+            git push -u origin main
+            
+            echo "Repository initialized with initial commit"
+          else
+            echo "Repository already exists: $REPO"
+          fi
+          
+          # Verify repository exists before proceeding
+          if ! gh repo view "$REPO" >/dev/null 2>&1; then
+            echo "ERROR: Repository $REPO does not exist after creation attempt"
+            exit 1
+          fi
 
-    - name: Error Handling
-      if: failure()
-      uses: actions/github-script@v6
-      with:
-        github-token: ${{secrets.ORG_ADMIN_TOKEN}}
-        script: |
-          core.setFailed('Submodule creation workflow failed')
+      - name: Push folder content to organization repo
+        env:
+          GH_TOKEN: ${{ secrets.ORG_ADMIN_TOKEN || github.token }}
+        run: |
+          FOLDER="${{ steps.meta.outputs.name }}"
+          REPO_URL="https://github.com/${{ steps.meta.outputs.repo }}.git"
+          
+          # Verify repository exists before attempting to push
+          echo "Verifying repository exists: ${{ steps.meta.outputs.repo }}"
+          if ! gh repo view "${{ steps.meta.outputs.repo }}" >/dev/null 2>&1; then
+            echo "ERROR: Repository ${{ steps.meta.outputs.repo }} does not exist!"
+            echo "Cannot push folder content to non-existent repository"
+            echo "This indicates the repository creation step failed"
+            exit 1
+          fi
+          echo "Repository exists, proceeding with push..."
+          
+          # Check if folder has any files
+          if [ -z "$(find "$FOLDER" -type f | head -1)" ]; then
+            echo "Warning: Folder $FOLDER is empty, creating placeholder file"
+            echo "# $FOLDER Source Repository" > "$FOLDER/README.md"
+            echo "This repository contains the source code for $FOLDER" >> "$FOLDER/README.md"
+          fi
+          
+          # Use direct method to push folder content
+          echo "Pushing folder content using direct method..."
+          TMPDIR=$(mktemp -d)
+          echo "Created temporary directory: $TMPDIR"
+          
+          # Copy folder content to temp directory
+          cp -r "$FOLDER" "$TMPDIR/repo"
+          echo "Copied folder content to temp directory"
+          
+          # Change to temp directory and initialize git
+          cd "$TMPDIR/repo"
+          echo "Changed to directory: $(pwd)"
+          
+          # Initialize git repository
+          git init
+          echo "Initialized git repository"
+          
+          # Configure git user
+          git config user.name "${{ github.actor }}"
+          git config user.email "${{ github.actor }}@users.noreply.github.com"
+          echo "Configured git user"
+          
+          # Add all files
+          git add .
+          echo "Added files to git"
+          
+          # Create commit
+          git commit -m "Add $FOLDER source content"
+          echo "Created commit"
+          
+          # Rename branch to main
+          git branch -M main
+          echo "Renamed branch to main"
+          
+          # Add remote and push
+          git remote add origin "$REPO_URL"
+          echo "Added remote origin"
+          
+          git push -u origin main
+          echo "Pushed to remote repository"
+
+      - name: Convert folder to submodule
+        run: |
+          FOLDER="${{ steps.meta.outputs.name }}"
+          REPO_URL="https://github.com/${{ steps.meta.outputs.repo }}.git"
+          
+          # Remove existing folder
+          echo "Removing existing folder: $FOLDER"
+          git rm -rf "$FOLDER" || true
+          
+          # Add repository as submodule
+          echo "Adding repository as submodule..."
+          git submodule add "$REPO_URL" "$FOLDER"
+          
+          # Commit the submodule addition
+          git add .gitmodules "$FOLDER"
+          git commit -m "Convert $FOLDER folder to submodule pointing to ${{ steps.meta.outputs.repo }}"
+
+      - name: Push submodule branch
+        run: |
+          git push -u origin "${{ steps.branch.outputs.branch }}"
+
+      - name: Merge submodule changes to main
+        run: |
+          # Switch to main branch
+          git checkout main
+          
+          # Merge the submodule branch
+          git merge "${{ steps.branch.outputs.branch }}" --no-ff -m "Merge: Convert ${{ steps.meta.outputs.name }} to submodule"
+          
+          # Push to main
+          git push origin main
+          
+          # Clean up the branch
+          git branch -d "${{ steps.branch.outputs.branch }}"
+          git push origin --delete "${{ steps.branch.outputs.branch }}"
