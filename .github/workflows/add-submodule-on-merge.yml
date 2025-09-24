@@ -55,7 +55,8 @@ jobs:
             gh repo create "${{ steps.meta.outputs.repo }}" \
               --private \
               --source=empty \
-              --description "Source repository for ${{ steps.meta.outputs.name }}" || {
+              --description "Source repository for ${{ steps.meta.outputs.name }}" \
+              --confirm || {
               echo "Failed to create repository"
               exit 1
             }
