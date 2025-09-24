@@ -61,15 +61,27 @@ jobs:
           # Create repository if it doesn't exist
           if ! gh repo view "$REPO" >/dev/null 2>&1; then
             echo "Creating repository: $REPO"
-            gh repo create "$REPO" \
+            if ! gh repo create "$REPO" \
               --private \
               --description "Source repository for ${{ steps.meta.outputs.name }}" \
-              --confirm || {
-              echo "Failed to create repository"
+              --confirm; then
+              echo "Failed to create repository: $REPO"
+              echo "Debugging information:"
+              echo "Current user: $(gh api user --jq '.login')"
+              echo "Organization access: $(gh api org/dsrctest --jq '.login' || echo 'No access')"
+              echo "Available repositories in org:"
+              gh api org/dsrctest/repos --jq '.[].name' || echo "Cannot list org repos"
               exit 1
-            }
+            fi
+            echo "Successfully created repository: $REPO"
           else
             echo "Repository already exists: $REPO"
+          fi
+          
+          # Verify repository exists before proceeding
+          if ! gh repo view "$REPO" >/dev/null 2>&1; then
+            echo "ERROR: Repository $REPO does not exist after creation attempt"
+            exit 1
           fi
 
       - name: Push folder content to organization repo
