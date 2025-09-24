@@ -116,10 +116,15 @@ jobs:
         echo "Successfully pushed content to $NEW_REPO"
 
     - name: Convert to submodule
+      env:
+        GH_TOKEN: ${{ secrets.ORG_ADMIN_TOKEN || github.token }}
       run: |
         FOLDER="${{ steps.meta.outputs.folder_name }}"
         NEW_REPO="${{ steps.meta.outputs.new_repo }}"
         REPO_URL="https://github.com/$NEW_REPO.git"
+        
+        # Configure Git authentication for submodule operations
+        gh auth setup-git
         
         # Remove existing folder
         git rm -rf "$FOLDER" || true
