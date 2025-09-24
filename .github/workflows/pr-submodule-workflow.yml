@@ -1,0 +1,198 @@
+name: PR Submodule Workflow
+on:
+  pull_request:
+    types: [opened, closed]
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  # Job 1: Create branch when PR is opened
+  create-branch:
+    if: github.event.action == 'opened'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract metadata from PR body
+        id: meta
+        run: |
+          BODY=$(jq -r '.pull_request.body' "$GITHUB_EVENT_PATH")
+          NAME=$(echo "$BODY" | sed -n 's/^Submodule-Name:[[:space:]]*//p' | head -1)
+          ORG=$(echo "$BODY"  | sed -n 's/^Submodule-Org:[[:space:]]*//p'   | head -1)
+          if [ -z "$NAME" ] || [ -z "$ORG" ]; then
+            echo "Missing Submodule-Name or Submodule-Org in PR body"; exit 1
+          fi
+          echo "name=$NAME" >> $GITHUB_OUTPUT
+          echo "org=$ORG"   >> $GITHUB_OUTPUT
+          echo "repo=${ORG}/${NAME}-source" >> $GITHUB_OUTPUT
+
+      - name: Configure git
+        run: |
+          git config user.name  "${{ github.actor }}"
+          git config user.email "${{ github.actor }}@users.noreply.github.com"
+
+      - name: Create working branch for folder
+        id: branch
+        run: |
+          BRANCH_NAME="feature-${NAME}-$(date +%Y%m%d%H%M%S)"
+          git checkout -b "$BRANCH_NAME"
+          echo "branch=$BRANCH_NAME" >> $GITHUB_OUTPUT
+          echo "Created branch: $BRANCH_NAME"
+
+      - name: Create Organization Repository
+        env:
+          GH_TOKEN: ${{ secrets.ORG_ADMIN_TOKEN || github.token }}
+        run: |
+          set -x
+          REPO="${{ steps.meta.outputs.repo }}"
+          
+          # Check if folder exists
+          if [ ! -d "${{ steps.meta.outputs.name }}" ]; then
+            echo "Error: Folder ${{ steps.meta.outputs.name }} does not exist"
+            exit 1
+          fi
+          
+          # Create repository if it doesn't exist
+          if ! gh repo view "$REPO" >/dev/null 2>&1; then
+            echo "Creating repository: $REPO"
+            gh repo create "$REPO" \
+              --private \
+              --description "Source repository for ${{ steps.meta.outputs.name }}" \
+              --confirm || {
+              echo "Failed to create repository"
+              exit 1
+            }
+          else
+            echo "Repository already exists: $REPO"
+          fi
+
+      - name: Push folder content to organization repo
+        env:
+          GH_TOKEN: ${{ secrets.ORG_ADMIN_TOKEN || github.token }}
+        run: |
+          FOLDER="${{ steps.meta.outputs.name }}"
+          REPO_URL="https://github.com/${{ steps.meta.outputs.repo }}.git"
+          
+          # Check if folder has any files
+          if [ -z "$(find "$FOLDER" -type f | head -1)" ]; then
+            echo "Warning: Folder $FOLDER is empty, creating placeholder file"
+            echo "# $FOLDER Source Repository" > "$FOLDER/README.md"
+            echo "This repository contains the source code for $FOLDER" >> "$FOLDER/README.md"
+          fi
+          
+          # Try subtree split first
+          if git subtree split --prefix="$FOLDER" -b tmp/split; then
+            git push --force "$REPO_URL" tmp/split:main
+            git branch -D tmp/split
+          else
+            # Fallback method for folder without git history
+            TMPDIR=$(mktemp -d)
+            cp -r "$FOLDER" "$TMPDIR/repo"
+            cd "$TMPDIR/repo"
+            
+            git init
+            git config user.name "${{ github.actor }}"
+            git config user.email "${{ github.actor }}@users.noreply.github.com"
+            
+            git add .
+            git commit -m "Initial commit for $FOLDER source"
+            git branch -M main
+            
+            git remote add origin "$REPO_URL"
+            git push -u origin main
+          fi
+
+      - name: Push branch to origin
+        run: |
+          git push -u origin "${{ steps.branch.outputs.branch }}"
+
+      - name: Comment on PR with branch info
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh pr comment ${{ github.event.pull_request.number }} \
+            --body "✅ Branch created: \`${{ steps.branch.outputs.branch }}\`
+          
+          📁 Folder \`${{ steps.meta.outputs.name }}\` has been pushed to repository: https://github.com/${{ steps.meta.outputs.repo }}
+          
+          🔄 When this PR is merged, the folder will be converted to a submodule."
+
+  # Job 2: Convert to submodule when PR is merged
+  convert-to-submodule:
+    if: github.event.action == 'closed' && github.event.pull_request.merged == true
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract metadata from PR body
+        id: meta
+        run: |
+          BODY=$(jq -r '.pull_request.body' "$GITHUB_EVENT_PATH")
+          NAME=$(echo "$BODY" | sed -n 's/^Submodule-Name:[[:space:]]*//p' | head -1)
+          ORG=$(echo "$BODY"  | sed -n 's/^Submodule-Org:[[:space:]]*//p'   | head -1)
+          if [ -z "$NAME" ] || [ -z "$ORG" ]; then
+            echo "Missing Submodule-Name or Submodule-Org in PR body"; exit 1
+          fi
+          echo "name=$NAME" >> $GITHUB_OUTPUT
+          echo "org=$ORG"   >> $GITHUB_OUTPUT
+          echo "repo=${ORG}/${NAME}-source" >> $GITHUB_OUTPUT
+
+      - name: Configure git
+        run: |
+          git config user.name  "${{ github.actor }}"
+          git config user.email "${{ github.actor }}@users.noreply.github.com"
+
+      - name: Create working branch for submodule conversion
+        id: branch
+        run: |
+          BRANCH_NAME="submodule-${NAME}-$(date +%Y%m%d%H%M%S)"
+          git checkout -b "$BRANCH_NAME"
+          echo "branch=$BRANCH_NAME" >> $GITHUB_OUTPUT
+          echo "Created branch: $BRANCH_NAME"
+
+      - name: Replace folder with submodule
+        run: |
+          NAME="${{ steps.meta.outputs.name }}"
+          URL="https://github.com/${{ steps.meta.outputs.repo }}.git"
+          
+          # Remove existing folder/submodule if it exists
+          if [ -d "$NAME/.git" ] || [ -e "$NAME" ]; then
+            git submodule deinit -f "$NAME" || true
+            git rm -rf "$NAME" || true
+            rm -rf ".git/modules/$NAME" || true
+          fi
+          
+          # Add new submodule
+          git submodule add "$URL" "$NAME"
+          git add .gitmodules "$NAME"
+          git commit -m "Convert $NAME folder to submodule" || echo "No changes to commit"
+
+      - name: Push submodule branch
+        run: git push -u origin "${{ steps.branch.outputs.branch }}"
+
+      - name: Create follow-up PR for submodule
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh pr create \
+            --base "main" \
+            --head "${{ steps.branch.outputs.branch }}" \
+            --title "Convert ${{ steps.meta.outputs.name }} to submodule" \
+            --body "This PR converts the \`${{ steps.meta.outputs.name }}\` folder to a submodule pointing to: https://github.com/${{ steps.meta.outputs.repo }}
+
+          **Changes:**
+          - Removed \`${{ steps.meta.outputs.name }}\` folder
+          - Added submodule pointing to \`${{ steps.meta.outputs.repo }}\`
+          - Updated \`.gitmodules\` file
+
+          **Source Repository:** https://github.com/${{ steps.meta.outputs.repo }}"
