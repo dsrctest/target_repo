@@ -74,6 +74,34 @@ jobs:
               exit 1
             fi
             echo "Successfully created repository: $REPO"
+            
+            # Initialize the repository with an initial commit
+            echo "Initializing repository with initial commit..."
+            TMPDIR=$(mktemp -d)
+            cd "$TMPDIR"
+            
+            # Clone the empty repository
+            git clone "https://github.com/$REPO.git" repo
+            cd repo
+            
+            # Create initial README
+            echo "# ${{ steps.meta.outputs.name }} Source Repository" > README.md
+            echo "" >> README.md
+            echo "This repository contains the source code for \`${{ steps.meta.outputs.name }}\`." >> README.md
+            echo "" >> README.md
+            echo "## About" >> README.md
+            echo "This repository was automatically created by GitHub Actions workflow." >> README.md
+            
+            # Configure git
+            git config user.name "${{ github.actor }}"
+            git config user.email "${{ github.actor }}@users.noreply.github.com"
+            
+            # Create initial commit
+            git add README.md
+            git commit -m "Initial commit: Add README"
+            git push -u origin main
+            
+            echo "Repository initialized with initial commit"
           else
             echo "Repository already exists: $REPO"
           fi
@@ -91,6 +119,16 @@ jobs:
           FOLDER="${{ steps.meta.outputs.name }}"
           REPO_URL="https://github.com/${{ steps.meta.outputs.repo }}.git"
           
+          # Verify repository exists before attempting to push
+          echo "Verifying repository exists: ${{ steps.meta.outputs.repo }}"
+          if ! gh repo view "${{ steps.meta.outputs.repo }}" >/dev/null 2>&1; then
+            echo "ERROR: Repository ${{ steps.meta.outputs.repo }} does not exist!"
+            echo "Cannot push folder content to non-existent repository"
+            echo "This indicates the repository creation step failed"
+            exit 1
+          fi
+          echo "Repository exists, proceeding with push..."
+          
           # Check if folder has any files
           if [ -z "$(find "$FOLDER" -type f | head -1)" ]; then
             echo "Warning: Folder $FOLDER is empty, creating placeholder file"
@@ -100,9 +138,11 @@ jobs:
           
           # Try subtree split first
           if git subtree split --prefix="$FOLDER" -b tmp/split; then
+            echo "Subtree split successful, pushing to repository..."
             git push --force "$REPO_URL" tmp/split:main
             git branch -D tmp/split
           else
+            echo "Subtree split failed, using fallback method..."
             # Fallback method for folder without git history
             TMPDIR=$(mktemp -d)
             cp -r "$FOLDER" "$TMPDIR/repo"
