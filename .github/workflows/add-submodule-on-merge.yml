@@ -8,8 +8,8 @@ permissions:
   pull-requests: write
 
 jobs:
-  # Job 1: Create branch when PR is opened
-  create-branch:
+  # Job 1: Create branch and submodule when PR is opened
+  create-branch-and-submodule:
     if: github.event.action == 'opened'
     runs-on: ubuntu-latest
     steps:
@@ -136,29 +136,53 @@ jobs:
             echo "This repository contains the source code for $FOLDER" >> "$FOLDER/README.md"
           fi
           
-          # Try subtree split first
-          if git subtree split --prefix="$FOLDER" -b tmp/split; then
-            echo "Subtree split successful, pushing to repository..."
-            git push --force "$REPO_URL" tmp/split:main
-            git branch -D tmp/split
-          else
-            echo "Subtree split failed, using fallback method..."
-            # Fallback method for folder without git history
-            TMPDIR=$(mktemp -d)
-            cp -r "$FOLDER" "$TMPDIR/repo"
-            cd "$TMPDIR/repo"
-            
-            git init
-            git config user.name "${{ github.actor }}"
-            git config user.email "${{ github.actor }}@users.noreply.github.com"
-            
-            git add .
-            git commit -m "Initial commit for $FOLDER source"
-            git branch -M main
-            
-            git remote add origin "$REPO_URL"
-            git push -u origin main
+          # Use direct method to push folder content
+          echo "Pushing folder content using direct method..."
+          TMPDIR=$(mktemp -d)
+          cp -r "$FOLDER" "$TMPDIR/repo"
+          cd "$TMPDIR/repo"
+          
+          git init
+          git config user.name "${{ github.actor }}"
+          git config user.email "${{ github.actor }}@users.noreply.github.com"
+          
+          git add .
+          git commit -m "Add $FOLDER source content"
+          git branch -M main
+          
+          git remote add origin "$REPO_URL"
+          git push -u origin main
+
+      - name: Add submodule to repository
+        env:
+          GH_TOKEN: ${{ secrets.ORG_ADMIN_TOKEN || github.token }}
+        run: |
+          FOLDER="${{ steps.meta.outputs.name }}"
+          REPO_URL="https://github.com/${{ steps.meta.outputs.repo }}.git"
+          
+          # Verify repository exists before attempting to add as submodule
+          echo "Verifying repository exists: ${{ steps.meta.outputs.repo }}"
+          if ! gh repo view "${{ steps.meta.outputs.repo }}" >/dev/null 2>&1; then
+            echo "ERROR: Repository ${{ steps.meta.outputs.repo }} does not exist!"
+            echo "Cannot add non-existent repository as submodule"
+            echo "This indicates the repository creation step failed"
+            exit 1
           fi
+          echo "Repository exists, proceeding with submodule addition..."
+          
+          # Remove existing folder/submodule if it exists
+          if [ -d "$FOLDER" ]; then
+            echo "Removing existing folder: $FOLDER"
+            git rm -rf "$FOLDER" || true
+          fi
+          
+          # Add repository as submodule
+          echo "Adding repository as submodule..."
+          git submodule add "$REPO_URL" "$FOLDER"
+          
+          # Commit the submodule addition
+          git add .gitmodules "$FOLDER"
+          git commit -m "Add $FOLDER as submodule from ${{ steps.meta.outputs.repo }}"
 
       - name: Push branch to origin
         run: |
@@ -171,12 +195,12 @@ jobs:
           gh pr comment ${{ github.event.pull_request.number }} \
             --body "✅ Branch created: \`${{ steps.branch.outputs.branch }}\`
           
-          📁 Folder \`${{ steps.meta.outputs.name }}\` has been pushed to repository: https://github.com/${{ steps.meta.outputs.repo }}
+          📁 Folder \`${{ steps.meta.outputs.name }}\` has been converted to submodule: https://github.com/${{ steps.meta.outputs.repo }}
           
-          🔄 When this PR is merged, the folder will be converted to a submodule."
+          🔄 Repository created and submodule added. Ready for merge!"
 
-  # Job 2: Convert to submodule when PR is merged
-  convert-to-submodule:
+  # Job 2: Create follow-up PR when original PR is merged
+  create-follow-up-pr:
     if: github.event.action == 'closed' && github.event.pull_request.merged == true
     runs-on: ubuntu-latest
     steps:
@@ -204,7 +228,7 @@ jobs:
           git config user.name  "${{ github.actor }}"
           git config user.email "${{ github.actor }}@users.noreply.github.com"
 
-      - name: Create working branch for submodule conversion
+      - name: Create working branch for submodule finalization
         id: branch
         run: |
           BRANCH_NAME="submodule-${NAME}-$(date +%Y%m%d%H%M%S)"
@@ -212,39 +236,37 @@ jobs:
           echo "branch=$BRANCH_NAME" >> $GITHUB_OUTPUT
           echo "Created branch: $BRANCH_NAME"
 
-      - name: Replace folder with submodule
+      - name: Update submodule reference
         run: |
           NAME="${{ steps.meta.outputs.name }}"
           URL="https://github.com/${{ steps.meta.outputs.repo }}.git"
           
-          # Remove existing folder/submodule if it exists
-          if [ -d "$NAME/.git" ] || [ -e "$NAME" ]; then
-            git submodule deinit -f "$NAME" || true
-            git rm -rf "$NAME" || true
-            rm -rf ".git/modules/$NAME" || true
-          fi
-          
-          # Add new submodule
-          git submodule add "$URL" "$NAME"
-          git add .gitmodules "$NAME"
-          git commit -m "Convert $NAME folder to submodule" || echo "No changes to commit"
+          # Update submodule to latest commit
+          git submodule update --init --recursive "$NAME"
+          git add "$NAME"
+          git commit -m "Update submodule $NAME to latest commit" || echo "No changes to commit"
 
       - name: Push submodule branch
         run: git push -u origin "${{ steps.branch.outputs.branch }}"
 
-      - name: Create follow-up PR for submodule
+      - name: Create follow-up PR for submodule finalization
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           gh pr create \
             --base "main" \
             --head "${{ steps.branch.outputs.branch }}" \
-            --title "Convert ${{ steps.meta.outputs.name }} to submodule" \
-            --body "This PR converts the \`${{ steps.meta.outputs.name }}\` folder to a submodule pointing to: https://github.com/${{ steps.meta.outputs.repo }}
+            --title "Finalize submodule ${{ steps.meta.outputs.name }}" \
+            --body "This PR finalizes the submodule setup for \`${{ steps.meta.outputs.name }}\`.
+
+          **Submodule Details:**
+          - **Name:** \`${{ steps.meta.outputs.name }}\`
+          - **Source Repository:** https://github.com/${{ steps.meta.outputs.repo }}
+          - **Status:** Submodule is ready for use
 
           **Changes:**
-          - Removed \`${{ steps.meta.outputs.name }}\` folder
-          - Added submodule pointing to \`${{ steps.meta.outputs.repo }}\`
-          - Updated \`.gitmodules\` file
+          - Submodule reference updated to latest commit
+          - \`.gitmodules\` file configured
+          - Ready for team collaboration
 
           **Source Repository:** https://github.com/${{ steps.meta.outputs.repo }}"
