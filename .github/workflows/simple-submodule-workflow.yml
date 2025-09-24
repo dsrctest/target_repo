@@ -9,22 +9,6 @@ permissions:
   pull-requests: write
 
 jobs:
-  pr-opened:
-    if: github.event.action == 'opened'
-    runs-on: ubuntu-latest
-    steps:
-    - name: Checkout repository
-      uses: actions/checkout@v4
-      with:
-        token: ${{ secrets.GITHUB_TOKEN }}
-    
-    - name: Comment on PR
-      env:
-        GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      run: |
-        gh pr comment ${{ github.event.pull_request.number }} \
-          --body "✅ PR received! This will be converted to a submodule when merged."
-
   convert-to-submodule:
     if: github.event.pull_request.merged == true
     runs-on: ubuntu-latest
