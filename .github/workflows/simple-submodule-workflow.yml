@@ -1,0 +1,115 @@
+name: Simple Submodule Workflow
+
+on:
+  pull_request:
+    types: [closed]
+
+jobs:
+  convert-to-submodule:
+    if: github.event.pull_request.merged == true
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
+
+    - name: Extract PR metadata
+      id: meta
+      run: |
+        # Get PR body to extract folder name and organization
+        BODY=$(jq -r '.pull_request.body' "$GITHUB_EVENT_PATH")
+        FOLDER_NAME=$(echo "$BODY" | grep -o 'Submodule-Name:[[:space:]]*[^[:space:]]*' | cut -d: -f2 | tr -d ' ')
+        ORG_NAME=$(echo "$BODY" | grep -o 'Submodule-Org:[[:space:]]*[^[:space:]]*' | cut -d: -f2 | tr -d ' ')
+        
+        # Default values if not found in PR body
+        if [ -z "$FOLDER_NAME" ]; then
+          FOLDER_NAME="submodule-$(date +%s)"
+        fi
+        if [ -z "$ORG_NAME" ]; then
+          ORG_NAME="dsrctest"
+        fi
+        
+        echo "folder_name=$FOLDER_NAME" >> $GITHUB_OUTPUT
+        echo "org_name=$ORG_NAME" >> $GITHUB_OUTPUT
+        echo "new_repo=$ORG_NAME/$FOLDER_NAME-source" >> $GITHUB_OUTPUT
+
+    - name: Configure Git
+      run: |
+        git config user.name "${{ github.actor }}"
+        git config user.email "${{ github.actor }}@users.noreply.github.com"
+
+    - name: Create new repository
+      env:
+        GH_TOKEN: ${{ secrets.ORG_ADMIN_TOKEN || github.token }}
+      run: |
+        NEW_REPO="${{ steps.meta.outputs.new_repo }}"
+        
+        # Check if repository already exists
+        if gh repo view "$NEW_REPO" >/dev/null 2>&1; then
+          echo "Repository $NEW_REPO already exists"
+        else
+          echo "Creating new repository: $NEW_REPO"
+          gh repo create "$NEW_REPO" \
+            --private \
+            --description "Source repository for ${{ steps.meta.outputs.folder_name }}" \
+            --confirm
+        fi
+
+    - name: Push folder content to new repository
+      env:
+        GH_TOKEN: ${{ secrets.ORG_ADMIN_TOKEN || github.token }}
+      run: |
+        FOLDER="${{ steps.meta.outputs.folder_name }}"
+        NEW_REPO="${{ steps.meta.outputs.new_repo }}"
+        REPO_URL="https://github.com/$NEW_REPO.git"
+        
+        # Check if folder exists
+        if [ ! -d "$FOLDER" ]; then
+          echo "Error: Folder $FOLDER not found"
+          exit 1
+        fi
+        
+        # Create temporary directory
+        TMPDIR=$(mktemp -d)
+        cd "$TMPDIR"
+        
+        # Clone the new repository
+        git clone "$REPO_URL" repo
+        cd repo
+        
+        # Copy folder content
+        cp -r "../../$FOLDER"/* .
+        
+        # Configure git
+        git config user.name "${{ github.actor }}"
+        git config user.email "${{ github.actor }}@users.noreply.github.com"
+        
+        # Add and commit changes
+        git add .
+        git commit -m "Add $FOLDER source content"
+        git push origin main
+        
+        echo "Successfully pushed content to $NEW_REPO"
+
+    - name: Convert to submodule
+      run: |
+        FOLDER="${{ steps.meta.outputs.folder_name }}"
+        NEW_REPO="${{ steps.meta.outputs.new_repo }}"
+        REPO_URL="https://github.com/$NEW_REPO.git"
+        
+        # Remove existing folder
+        git rm -rf "$FOLDER" || true
+        
+        # Add as submodule
+        git submodule add "$REPO_URL" "$FOLDER"
+        
+        # Commit submodule addition
+        git add .gitmodules "$FOLDER"
+        git commit -m "Convert $FOLDER to submodule from $NEW_REPO"
+
+    - name: Push changes
+      run: |
+        git push origin main
+        echo "Successfully converted ${{ steps.meta.outputs.folder_name }} to submodule"
