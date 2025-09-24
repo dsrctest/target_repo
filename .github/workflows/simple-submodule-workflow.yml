@@ -109,6 +109,9 @@ jobs:
         git add .
         git commit -m "Add $FOLDER source content"
         
+        # Rename branch to main
+        git branch -M main
+        
         # Add remote and push
         git remote add origin "https://github.com/$NEW_REPO.git"
         git push -u origin main
