@@ -9,6 +9,11 @@ jobs:
     if: github.event.action == 'opened'
     runs-on: ubuntu-latest
     steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+      with:
+        token: ${{ secrets.GITHUB_TOKEN }}
+    
     - name: Comment on PR
       env:
         GH_TOKEN: ${{ github.token }}
