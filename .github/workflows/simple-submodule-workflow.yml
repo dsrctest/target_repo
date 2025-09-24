@@ -83,7 +83,6 @@ jobs:
       run: |
         FOLDER="${{ steps.meta.outputs.folder_name }}"
         NEW_REPO="${{ steps.meta.outputs.new_repo }}"
-        REPO_URL="https://github.com/$NEW_REPO.git"
         
         # Check if folder exists
         if [ ! -d "$FOLDER" ]; then
@@ -95,8 +94,8 @@ jobs:
         TMPDIR=$(mktemp -d)
         cd "$TMPDIR"
         
-        # Clone the new repository
-        git clone "$REPO_URL" repo
+        # Initialize new git repository
+        git init repo
         cd repo
         
         # Copy folder content
@@ -109,7 +108,10 @@ jobs:
         # Add and commit changes
         git add .
         git commit -m "Add $FOLDER source content"
-        git push origin main
+        
+        # Add remote and push
+        git remote add origin "https://github.com/$NEW_REPO.git"
+        git push -u origin main
         
         echo "Successfully pushed content to $NEW_REPO"
 
