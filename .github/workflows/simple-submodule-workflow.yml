@@ -2,11 +2,22 @@ name: Simple Submodule Workflow
 
 on:
   pull_request:
-    types: [closed]
+    types: [opened, closed]
 
 jobs:
+  pr-opened:
+    if: github.event.action == 'opened'
+    runs-on: ubuntu-latest
+    steps:
+    - name: Comment on PR
+      env:
+        GH_TOKEN: ${{ github.token }}
+      run: |
+        gh pr comment ${{ github.event.pull_request.number }} \
+          --body "✅ PR received! This will be converted to a submodule when merged."
+
   convert-to-submodule:
-    if: github.event.pull_request.merged == true
+    if: github.event.action == 'closed' && github.event.pull_request.merged == true
     runs-on: ubuntu-latest
     
     steps:
