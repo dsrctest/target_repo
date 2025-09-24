@@ -1,13 +1,10 @@
 name: Add submodule after PR merge
-
 on:
   pull_request:
     types: [closed]
-
 permissions:
   contents: write
   pull-requests: write
-
 jobs:
   add-submodule:
     if: github.event.pull_request.merged == true
@@ -19,6 +16,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Extract metadata from PR body
         id: meta
@@ -49,9 +47,18 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.ORG_ADMIN_TOKEN }}
         run: |
+          set -x
+          # Check if repository exists
           if ! gh repo view "${{ steps.meta.outputs.repo }}" >/dev/null 2>&1; then
             echo "Creating repository: ${{ steps.meta.outputs.repo }}"
-            gh repo create "${{ steps.meta.outputs.repo }}" --private
+            # Create empty private repository
+            gh repo create "${{ steps.meta.outputs.repo }}" \
+              --private \
+              --source=empty \
+              --description "Source repository for ${{ steps.meta.outputs.name }}" || {
+              echo "Failed to create repository"
+              exit 1
+            }
           else
             echo "Repository already exists: ${{ steps.meta.outputs.repo }}"
           fi
@@ -61,19 +68,27 @@ jobs:
           GH_TOKEN: ${{ secrets.ORG_ADMIN_TOKEN }}
         run: |
           FOLDER="${{ steps.meta.outputs.name }}"
+          
+          # Attempt to split subtree
           git subtree split --prefix="$FOLDER" -b tmp/split || true
+          
           if git rev-parse --verify tmp/split >/dev/null 2>&1; then
+            # Push split history to new repository
             git push --force "https://github.com/${{ steps.meta.outputs.repo }}.git" tmp/split:main
           else
+            # If no history, create new repository with folder contents
             TMPDIR=$(mktemp -d)
             cp -r "$FOLDER" "$TMPDIR/repo"
             cd "$TMPDIR/repo"
+            
             git init
             git config user.name  "${{ github.actor }}"
             git config user.email "${{ github.actor }}@users.noreply.github.com"
+            
             git add .
             git commit -m "Initial commit for $FOLDER-source"
             git branch -M main
+            
             git remote add origin "https://github.com/${{ steps.meta.outputs.repo }}.git"
             git push -u origin main
           fi
@@ -82,11 +97,15 @@ jobs:
         run: |
           NAME="${{ steps.meta.outputs.name }}"
           URL="https://github.com/${{ steps.meta.outputs.repo }}.git"
+          
+          # Remove existing folder/submodule if it exists
           if [ -d "$NAME/.git" ] || [ -e "$NAME" ]; then
             git submodule deinit -f "$NAME" || true
             git rm -rf "$NAME" || true
             rm -rf ".git/modules/$NAME" || true
           fi
+          
+          # Add new submodule
           git submodule add "$URL" "$NAME"
           git add .gitmodules "$NAME"
           git commit -m "Replace $NAME with submodule" || echo "No changes to commit"
