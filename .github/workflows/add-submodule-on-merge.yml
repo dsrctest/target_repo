@@ -32,12 +32,12 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           gh pr comment ${{ github.event.pull_request.number }} \
-            --body "✅ PR received for \`${{ steps.meta.outputs.name }}\`
+            --body "✅ PR received for ${{ steps.meta.outputs.name }}
           
           📁 This PR contains the folder content that will be converted to a submodule after merge.
           
           🔄 When this PR is merged, the workflow will:
-          1. Create organization repository: \`${{ steps.meta.outputs.repo }\`
+          1. Create organization repository: ${{ steps.meta.outputs.repo }}
           2. Push folder content to the new repository
           3. Convert the folder to a submodule pointing to the new repository"
 
@@ -120,7 +120,7 @@ jobs:
             # Create initial README
             echo "# ${{ steps.meta.outputs.name }} Source Repository" > README.md
             echo "" >> README.md
-            echo "This repository contains the source code for \`${{ steps.meta.outputs.name }}\`." >> README.md
+            echo "This repository contains the source code for ${{ steps.meta.outputs.name }}." >> README.md
             echo "" >> README.md
             echo "## About" >> README.md
             echo "This repository was automatically created by GitHub Actions workflow." >> README.md
