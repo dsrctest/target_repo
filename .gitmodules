@@ -10,3 +10,6 @@
 [submodule "deepcraftpsco_edge"]
 	path = deepcraftpsco_edge
 	url = https://github.com/dsrctest/deepcraftpsco_edge-source.git
+[submodule "deepcraftpsco_edge11"]
+	path = deepcraftpsco_edge11
+	url = https://github.com/dsrctest/deepcraftpsco_edge11-source.git
