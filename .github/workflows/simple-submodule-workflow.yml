@@ -3,14 +3,26 @@ name: Simple Submodule Workflow
 on:
   pull_request:
     types: [opened, closed]
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      folder_name:
+        description: 'Folder name to convert to submodule'
+        required: true
+        type: string
+      new_repo:
+        description: 'New repository name (owner/repo-name)'
+        required: true
+        type: string
 
 permissions:
   contents: write
   pull-requests: write
+  actions: read
 
 jobs:
   convert-to-submodule:
-    if: github.event.pull_request.merged == true
+    if: github.event_name == 'workflow_dispatch' || (github.event_name == 'pull_request' && github.event.pull_request.merged == true)
     runs-on: ubuntu-latest
     
     steps:
@@ -18,26 +30,80 @@ jobs:
       uses: actions/checkout@v4
       with:
         fetch-depth: 0
+        token: ${{ secrets.ORG_ADMIN_TOKEN || secrets.GITHUB_TOKEN }}
+        submodules: false
 
-    - name: Extract PR metadata
+    - name: Extract metadata
       id: meta
       run: |
-        # Get PR body to extract folder name and organization
-        BODY=$(jq -r '.pull_request.body' "$GITHUB_EVENT_PATH")
-        FOLDER_NAME=$(echo "$BODY" | grep -o 'Submodule-Name:[[:space:]]*[^[:space:]]*' | cut -d: -f2 | tr -d ' ')
-        ORG_NAME=$(echo "$BODY" | grep -o 'Submodule-Org:[[:space:]]*[^[:space:]]*' | cut -d: -f2 | tr -d ' ')
+        echo "🔍 Extracting metadata..."
+        echo "Event: ${{ github.event_name }}"
         
-        # Default values if not found in PR body
-        if [ -z "$FOLDER_NAME" ]; then
-          FOLDER_NAME="submodule-$(date +%s)"
-        fi
-        if [ -z "$ORG_NAME" ]; then
-          ORG_NAME="dsrctest"
+        # Check if this is a manual trigger or PR merge
+        if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+          # Manual trigger - use inputs
+          FOLDER_NAME="${{ inputs.folder_name }}"
+          NEW_REPO="${{ inputs.new_repo }}"
+          ORG_NAME=$(echo "$NEW_REPO" | cut -d'/' -f1)
+          echo "📝 Manual trigger: $FOLDER_NAME -> $NEW_REPO"
+        else
+          # PR merge - extract from PR body
+          echo "📝 Extracting from PR body..."
+          BODY=$(jq -r '.pull_request.body // "N/A"' "$GITHUB_EVENT_PATH")
+          echo "PR Body preview: $(echo "$BODY" | head -c 200)..."
+          
+          # Extract folder name - look for "Add folder: " pattern first (from pr_tool.py)
+          FOLDER_NAME=$(echo "$BODY" | grep -oE 'Add folder: ([^(]+)' | sed 's/Add folder: //' | head -1)
+          
+          # Clean the folder name (remove leading/trailing spaces and dashes)
+          FOLDER_NAME=$(echo "$FOLDER_NAME" | sed -e 's/^[[:space:]-]*//' -e 's/[[:space:]-]*$//')
+          
+          # If not found, try to get from commit messages
+          if [ -z "$FOLDER_NAME" ]; then
+            echo "⚠️  Could not extract folder name from PR body, trying commit messages..."
+            FOLDER_NAME=$(git log --oneline -10 | grep -oE 'Add folder: ([^(]+)' | sed 's/Add folder: //' | head -1)
+            if [ -z "$FOLDER_NAME" ]; then
+              echo "❌ No folder name found, exiting"
+              exit 1
+            fi
+          fi
+          
+          # Extract org name
+          ORG_NAME=$(echo "$BODY" | grep -oE 'submodule_org: ([^\\n]+)' | sed 's/submodule_org: //' | tr -d ' ')
+          if [ -z "$ORG_NAME" ]; then
+            ORG_NAME=$(echo "$BODY" | grep -oE 'Submodule-Org:[ ]*([^[:space:]\\n]+)' | sed 's/Submodule-Org:[ ]*//')
+          fi
+          
+          if [ -z "$ORG_NAME" ]; then
+            ORG_NAME="dsrctest"
+          fi
+          
+          NEW_REPO="$ORG_NAME/$FOLDER_NAME"
+          
+          echo "📦 Extracted metadata:"
+          echo "  Folder: $FOLDER_NAME"
+          echo "  Org: $ORG_NAME"
+          echo "  Repo: $NEW_REPO"
         fi
         
         echo "folder_name=$FOLDER_NAME" >> $GITHUB_OUTPUT
         echo "org_name=$ORG_NAME" >> $GITHUB_OUTPUT
-        echo "new_repo=$ORG_NAME/$FOLDER_NAME-source" >> $GITHUB_OUTPUT
+        echo "new_repo=$NEW_REPO" >> $GITHUB_OUTPUT
+
+    - name: Verify folder exists
+      run: |
+        FOLDER="${{ steps.meta.outputs.folder_name }}"
+        FOLDER=$(printf '%s' "$FOLDER" | sed -e 's/^[[:space:]]\+//' -e 's/[[:space:]]\+$//')
+        echo "🔍 Checking if folder '$FOLDER' exists..."
+        
+        if [ ! -d "$FOLDER" ]; then
+          echo "❌ Folder '$FOLDER' not found"
+          echo "📁 Available directories:"
+          ls -la
+          exit 1
+        fi
+        
+        echo "✅ Folder '$FOLDER' exists"
 
     - name: Configure Git
       run: |
@@ -46,43 +112,41 @@ jobs:
 
     - name: Create new repository
       env:
-        GH_TOKEN: ${{ secrets.ORG_ADMIN_TOKEN || github.token }}
+        GH_TOKEN: ${{ secrets.ORG_ADMIN_TOKEN || secrets.GITHUB_TOKEN }}
       run: |
         NEW_REPO="${{ steps.meta.outputs.new_repo }}"
         
+        echo "🏗️ Creating repository: $NEW_REPO"
+        
         # Check if repository already exists
         if gh repo view "$NEW_REPO" >/dev/null 2>&1; then
-          echo "Repository $NEW_REPO already exists"
+          echo "⚠️  Repository $NEW_REPO already exists - will use existing"
         else
-          echo "Creating new repository: $NEW_REPO"
+          echo "🔨 Creating new repository: $NEW_REPO"
           gh repo create "$NEW_REPO" \
             --private \
-            --description "Source repository for ${{ steps.meta.outputs.folder_name }}" \
+            --description "Source repository for ${{ steps.meta.outputs.folder_name }} submodule" \
             --confirm
         fi
 
     - name: Push folder content to new repository
       env:
-        GH_TOKEN: ${{ secrets.ORG_ADMIN_TOKEN || github.token }}
+        GH_TOKEN: ${{ secrets.ORG_ADMIN_TOKEN || secrets.GITHUB_TOKEN }}
       run: |
         FOLDER="${{ steps.meta.outputs.folder_name }}"
         NEW_REPO="${{ steps.meta.outputs.new_repo }}"
         
-        # Check if folder exists
-        if [ ! -d "$FOLDER" ]; then
-          echo "Error: Folder $FOLDER not found"
-          exit 1
-        fi
+        echo "📂 Pushing folder '$FOLDER' to repository '$NEW_REPO'"
         
         # Create temporary directory
         TMPDIR=$(mktemp -d)
         cd "$TMPDIR"
         
-        # Clone the repository using GitHub CLI
+        # Clone the repository
         gh repo clone "$NEW_REPO" repo
         cd repo
         
-        # Copy folder content from the original repository
+        # Copy folder content
         cp -r "$GITHUB_WORKSPACE/$FOLDER"/* .
         
         # Configure git
@@ -93,21 +157,23 @@ jobs:
         git add .
         git commit -m "Add $FOLDER source content"
         
-        # Use GitHub CLI to push (more reliable)
+        # Push changes
         gh auth setup-git
         git push origin main
         
-        echo "Successfully pushed content to $NEW_REPO"
+        echo "✅ Successfully pushed content to $NEW_REPO"
 
     - name: Convert to submodule
       env:
-        GH_TOKEN: ${{ secrets.ORG_ADMIN_TOKEN || github.token }}
+        GH_TOKEN: ${{ secrets.ORG_ADMIN_TOKEN || secrets.GITHUB_TOKEN }}
       run: |
         FOLDER="${{ steps.meta.outputs.folder_name }}"
         NEW_REPO="${{ steps.meta.outputs.new_repo }}"
         REPO_URL="https://github.com/$NEW_REPO.git"
         
-        # Configure Git authentication for submodule operations
+        echo "🔗 Converting '$FOLDER' to submodule from '$NEW_REPO'"
+        
+        # Configure Git authentication
         gh auth setup-git
         
         # Remove existing folder
@@ -120,12 +186,23 @@ jobs:
         git add .gitmodules "$FOLDER"
         git commit -m "Convert $FOLDER to submodule from $NEW_REPO"
 
-    - name: Push changes
+    - name: Push changes to main
       env:
-        GH_TOKEN: ${{ secrets.ORG_ADMIN_TOKEN || github.token }}
+        GH_TOKEN: ${{ secrets.ORG_ADMIN_TOKEN || secrets.GITHUB_TOKEN }}
       run: |
-        # Use GitHub CLI for authentication
+        echo "🚀 Pushing submodule changes to main branch"
+        
+        # Configure Git authentication
         gh auth setup-git
         
-        git push origin main
-        echo "Successfully converted ${{ steps.meta.outputs.folder_name }} to submodule"
+        # Pull latest changes first
+        git pull origin main --no-edit || echo "Pull failed, continuing..."
+        
+        # Push changes
+        git push origin main || {
+          echo "❌ Standard push failed, trying force push..."
+          git push --force-with-lease origin main
+        }
+        
+        echo "✅ Successfully converted ${{ steps.meta.outputs.folder_name }} to submodule"
+        echo "🔗 Repository: https://github.com/${{ steps.meta.outputs.new_repo }}"
