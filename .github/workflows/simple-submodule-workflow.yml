@@ -189,6 +189,8 @@ jobs:
         # Check if repository already exists
         if gh repo view "$NEW_REPO" >/dev/null 2>&1; then
           echo "⚠️  Repository $NEW_REPO already exists - will skip creation"
+          echo "✅ Using existing repository: $NEW_REPO"
+          echo "🔗 Repository URL: https://github.com/$NEW_REPO"
         else
           echo "🔨 Creating new organization repository: $NEW_REPO"
           
@@ -200,7 +202,7 @@ jobs:
           if gh repo create "$NEW_REPO" \
             --private \
             --description "$DESCRIPTION" \
-            --yes; then
+            --confirm; then
             
             echo "✅ Successfully created repository: $NEW_REPO"
             
