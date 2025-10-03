@@ -83,39 +83,7 @@ jobs:
         cd repo
         
         # Copy folder content from the original repository
-        # Handle both empty and non-empty folders
-        if [ -d "$GITHUB_WORKSPACE/$FOLDER" ]; then
-          echo "Found folder: $FOLDER"
-          # Check if folder has any contents
-          if [ "$(ls -A "$GITHUB_WORKSPACE/$FOLDER" 2>/dev/null)" ]; then
-            echo "Copying contents from $FOLDER"
-            # Copy all contents (including hidden files)
-            cp -r "$GITHUB_WORKSPACE/$FOLDER"/. . 2>/dev/null || true
-          else
-            echo "Folder $FOLDER is empty, creating placeholder"
-          fi
-        else
-          echo "Warning: Folder $FOLDER not found, creating placeholder"
-        fi
-        
-        # Ensure we always have at least one file to commit
-        if [ ! "$(ls -A . 2>/dev/null)" ]; then
-          echo "Creating README.md placeholder"
-          cat > README.md << EOF
-# $FOLDER
-
-This is the source repository for the $FOLDER submodule.
-
-## Contents
-This repository contains the source code for the $FOLDER component that is included as a submodule in the main project.
-
-## Usage
-This submodule is automatically managed by the main repository's workflow system.
-
----
-*Generated automatically on $(date)*
-EOF
-        fi
+        cp -r "$GITHUB_WORKSPACE/$FOLDER"/* .
         
         # Configure git
         git config user.name "${{ github.actor }}"
