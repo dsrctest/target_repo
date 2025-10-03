@@ -1,0 +1,110 @@
+name: Debug Submodule Workflow
+
+on:
+  workflow_dispatch:
+    inputs:
+      pr_number:
+        description: 'PR Number to debug'
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  pull-requests: read
+
+jobs:
+  debug-submodule:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
+
+    - name: Debug PR Information
+      run: |
+        PR_NUMBER="${{ inputs.pr_number }}"
+        echo "🔍 Debugging PR #$PR_NUMBER"
+        
+        # Get PR information
+        gh pr view "$PR_NUMBER" --json body,title,headRefName,commits
+        
+        echo ""
+        echo "📝 PR Body (first 500 chars):"
+        gh pr view "$PR_NUMBER" --json body --jq '.body' | head -c 500
+        echo ""
+        
+        echo ""
+        echo "🎯 Extracting submodule metadata:"
+        
+        # Try different extraction methods
+        BHODY=$(gh pr view "$PR_NUMBER" --json body --jq '.body')
+        echo "Raw body length: $(echo "$BHODY" | wc -c)"
+        
+        echo ""
+        echo "🔍 Testing extraction methods..."
+        
+        # Method 1: Look for "Add folder:" pattern
+        MATCH1=$(echo "$BHODY" | grep -oE 'Add folder: ([^(]+)' | sed 's/Add folder: //' | head -1)
+        echo "Method 1 (Add folder: pattern): '$MATCH1'"
+        
+        # Method 2: Look for submodule metadata
+        MATCH2=$(echo "$BHODY" | grep -oE 'submodule_name: ([^\\n]+)' | sed 's/submodule_name: //' | tr -d ' ')
+        echo "Method 2 (submodule_name): '$MATCH2'"
+        
+        # Method 3: Look for old format
+        MATCH3=$(echo "$BHODY" | grep -oE 'Submodule-Name:[ ]*([^[:space:]\\n]+)' | sed 's/Submodule-Name:[ ]*//')
+        echo "Method 3 (Submodule-Name): '$MATCH3'"
+        
+        # Method 4: Look for org name
+        ORG1=$(echo "$BHODY" | grep -oE 'submodule_org: ([^\\n]+)' | sed 's/submodule_org: //' | tr -d ' ')
+        echo "Org Method 1 (submodule_org): '$ORG1'"
+        
+        ORG2=$(echo "$BHODY" | grep -oE 'Submodule-Org:[ ]*([^[:space:]\\n]+)' | sed 's/Submodule-Org:[ ]*//')
+        echo "Org Method 2 (Submodule-Org): '$ORG2'"
+
+    - name: Debug Repository State
+      run: |
+        echo "📁 Current directory contents:"
+        ls -la
+        
+        echo ""
+        echo "🔍 Available folders:"
+        find . -maxdepth 3 -type d | head -20
+        
+        echo ""
+        echo "🏷️ Recent commits:"
+        git log --oneline -10
+        
+        echo ""
+        echo "📊 Git configuration:"
+        git config --list | grep -E "(user|remote)"
+
+    - name: Debug Token Permissions
+      env:
+        GH_TOKEN: ${{ secrets.ORG_ADMIN_TOKEN || secrets.GITHUB_TOKEN }}
+      run: |
+        echo "🔐 Checking GitHub CLI authentication..."
+        gh auth status
+        
+        echo ""
+        echo "👤 User information:"
+        gh api user --jq '.login'
+        
+        echo ""
+        echo "🏢 Organization permissions (dsrctest):"
+        gh api orgs/dsrctest --jq '.login' || echo "❌ Cannot access dsrctest org"
+        
+        echo ""
+        echo "📚 Repository access test:"
+        gh repo list --limit 5
+
+    - name: Debug Recent Workflows
+      run: |
+        echo "🔄 Recent workflow runs:"
+        gh run list --limit 5
+        
+        echo ""
+        echo "🔍 Failed workflow runs:"
+        gh run list --status failure --limit 3
