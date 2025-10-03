@@ -55,13 +55,13 @@ jobs:
           # Extract folder name - look for "Add folder: " pattern first (from pr_tool.py)
           FOLDER_NAME=$(echo "$BODY" | grep -oE 'Add folder: ([^(]+)' | sed 's/Add folder: //' | head -1)
           
-          # Clean the folder name (remove leading/trailing spaces and dashes)
-          FOLDER_NAME=$(echo "$FOLDER_NAME" | sed -e 's/^[[:space:]-]*//' -e 's/[[:space:]-]*$//')
+          # Clean the folder name (remove ALL leading/trailing whitespace)
+          FOLDER_NAME=$(echo "$FOLDER_NAME" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')
           
           # If not found, try to get from commit messages
           if [ -z "$FOLDER_NAME" ]; then
             echo "⚠️  Could not extract folder name from PR body, trying commit messages..."
-            FOLDER_NAME=$(git log --oneline -10 | grep -oE 'Add folder: ([^(]+)' | sed 's/Add folder: //' | head -1)
+            FOLDER_NAME=$(git log --oneline -10 | grep -oE 'Add folder: ([^(]+)' | sed 's/Add folder: //' | head -1 | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')
             if [ -z "$FOLDER_NAME" ]; then
               echo "❌ No folder name found, exiting"
               exit 1
