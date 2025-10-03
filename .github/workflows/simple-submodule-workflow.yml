@@ -69,15 +69,36 @@ jobs:
       run: |
         NEW_REPO="${{ steps.meta.outputs.new_repo }}"
         
+        echo "Checking if repository $NEW_REPO exists..."
+        
         # Check if repository already exists
         if gh repo view "$NEW_REPO" >/dev/null 2>&1; then
-          echo "Repository $NEW_REPO already exists"
+          echo "✅ Repository $NEW_REPO already exists"
         else
-          echo "Creating new repository: $NEW_REPO"
-          gh repo create "$NEW_REPO" \
+          echo "🔨 Creating new repository: $NEW_REPO"
+          
+          # Create the repository
+          if gh repo create "$NEW_REPO" \
             --private \
             --description "Source repository for ${{ steps.meta.outputs.folder_name }}" \
-            --confirm
+            --confirm; then
+            echo "✅ Successfully created repository: $NEW_REPO"
+            
+            # Wait a moment for GitHub to fully initialize the repository
+            echo "⏳ Waiting for repository to be fully initialized..."
+            sleep 5
+            
+            # Verify the repository was created
+            if gh repo view "$NEW_REPO" >/dev/null 2>&1; then
+              echo "✅ Repository $NEW_REPO is ready"
+            else
+              echo "❌ Failed to verify repository creation"
+              exit 1
+            fi
+          else
+            echo "❌ Failed to create repository: $NEW_REPO"
+            exit 1
+          fi
         fi
 
     - name: Push folder content to new repository
@@ -98,8 +119,26 @@ jobs:
         cd "$TMPDIR"
         
         # Clone the repository using GitHub CLI
+        echo "🔍 Attempting to clone repository: $NEW_REPO"
+        
+        # Verify the repository exists before cloning
+        if ! gh repo view "$NEW_REPO" >/dev/null 2>&1; then
+          echo "❌ Repository $NEW_REPO does not exist or is not accessible"
+          echo "🔍 Available repositories:"
+          gh repo list --limit 10
+          exit 1
+        fi
+        
+        echo "✅ Repository $NEW_REPO exists, proceeding with clone..."
         gh repo clone "$NEW_REPO" repo
+        
+        if [ ! -d "repo" ]; then
+          echo "❌ Failed to clone repository $NEW_REPO"
+          exit 1
+        fi
+        
         cd repo
+        echo "✅ Successfully cloned into repo directory"
         
         # Copy folder content from the original repository
         # Handle both empty and non-empty folders
