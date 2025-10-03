@@ -1,0 +1,28 @@
+{
+  "title": "testing",
+  "description": "testing",
+  "long_description": "testing",
+  "sensors": [
+    "Microphone"
+  ],
+  "domain": [
+    "IoT"
+  ],
+  "application": [
+    "Industrial IoT"
+  ],
+  "use_case": [
+    "Keyword Spotting"
+  ],
+  "kit": [
+    "NVIDIA Jetson"
+  ],
+  "device": [
+    "ARM Cortex-M"
+  ],
+  "thumbnail_image_id": "",
+  "main_image_id": "",
+  "brand_image_id": "",
+  "links": [],
+  "metrics": []
+}
