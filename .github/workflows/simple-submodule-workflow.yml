@@ -373,27 +373,36 @@ jobs:
           echo "✅ Submodule conversion committed"
         fi
 
-    - name: "Step 4: Push submodule changes to main repository"
+    - name: "Step 4: Merge submodule changes to main branch"
       env:
         GH_TOKEN: ${{ secrets.ORG_ADMIN_TOKEN || secrets.GITHUB_TOKEN }}
       run: |
-        echo "🚀 STEP 4: Pushing submodule changes back to main repository"
+        echo "🚀 STEP 4: Merging submodule changes to main branch"
         
         # Ensure authentication
         gh auth setup-git
         
-        # Show status before push
-        echo "📋 Git status:"
+        # Show status before merge
+        echo "📋 Git status before merge:"
         git status
         
         # Pull latest changes to avoid conflicts
         echo "🔄 Pulling latest changes from remote..."
         git pull origin main --no-edit || {
-          echo "⚠️  Pull failed, but continuing with force push..."
+          echo "⚠️  Pull failed, but continuing..."
         }
         
-        # Push changes
-        echo "🚀 Pushing changes to remote..."
+        # Create a merge commit for the submodule conversion
+        echo "🔀 Creating merge commit for submodule conversion..."
+        MERGE_MSG="Merge: Convert ${{ steps.meta.outputs.folder_name }} to submodule - Created organization repository: ${{ steps.meta.outputs.new_repo }} - Converted folder to submodule tracking branch: ${{ steps.meta.outputs.branch_name }} - Submodule source: https://github.com/${{ steps.meta.outputs.new_repo }} - Auto-generated from PR #${{ github.event.pull_request.number || 'manual' }}"
+        
+        # Commit the merge
+        git commit --no-edit -m "$MERGE_MSG" || {
+          echo "⚠️  No merge commit needed (already up to date)"
+        }
+        
+        # Push the merged changes to main
+        echo "🚀 Pushing merged changes to main branch..."
         git push origin main || {
           echo "❌ Standard push failed, trying force push..."
           git push --force-with-lease origin main || {
@@ -405,8 +414,10 @@ jobs:
           }
         }
         
-        echo "✅ Successfully pushed all changes"
+        echo "✅ Successfully merged submodule changes to main branch"
         echo "🎉 Submodule conversion completed for '${{ steps.meta.outputs.folder_name }}'"
+        echo "🔗 Submodule: https://github.com/${{ steps.meta.outputs.new_repo }}"
+        echo "📄 Main branch updated with submodule reference"
 
     - name: Handle workflow failure
       if: failure()
