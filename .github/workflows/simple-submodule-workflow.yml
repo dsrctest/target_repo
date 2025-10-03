@@ -65,6 +65,9 @@ jobs:
             FOLDER_NAME=$(echo "$BODY" | grep -oE 'Submodule-Name:[ ]*([^[:space:]\\n]+)' | sed 's/Submodule-Name:[ ]*//')
           fi
           
+          # Clean the folder name (remove leading/trailing spaces and dashes)
+          FOLDER_NAME=$(echo "$FOLDER_NAME" | sed -e 's/^[[:space:]-]*//' -e 's/[[:space:]-]*$//')
+          
           # Extract org name
           ORG_NAME=$(echo "$BODY" | grep -oE 'submodule_org: ([^\\n]+)' | sed 's/submodule_org: //' | tr -d ' ')
           if [ -z "$ORG_NAME" ]; then
@@ -101,7 +104,7 @@ jobs:
         echo "org_name=$ORG_NAME" >> $GITHUB_OUTPUT
         echo "new_repo=$NEW_REPO" >> $GITHUB_OUTPUT
         # Create a sanitized branch name from folder (e.g., submodule/folder-name)
-        BRANCH_NAME=$(echo "submodule/$FOLDER_NAME" | tr '[:upper:]' '[:lower:]' | sed -E 's/[^a-z0-9._\/-]+/-/g; s/-+/-/g; s#/+#/#g; s#(^/|/$)##g')
+        BRANCH_NAME=$(echo "submodule/$FOLDER_NAME" | tr '[:upper:]' '[:lower:]' | sed -E 's/[^a-z0-9._\/-]+/-/g; s/-+/-/g; s#/+#/#g; s#(^/|/$)##g; s/-$//')
         echo "branch_name=$BRANCH_NAME" >> $GITHUB_OUTPUT
 
     - name: Clean up broken submodules
