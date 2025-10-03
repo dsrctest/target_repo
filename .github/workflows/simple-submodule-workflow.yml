@@ -120,20 +120,18 @@ jobs:
         # Ensure we always have at least one file to commit
         if [ ! "$(ls -A . 2>/dev/null)" ]; then
           echo "Creating README.md placeholder"
-          cat > README.md << EOF
-# $FOLDER
-
-This is the source repository for the $FOLDER submodule.
-
-## Contents
-This repository contains the source code for the $FOLDER component that is included as a submodule in the main project.
-
-## Usage
-This submodule is automatically managed by the main repository's workflow system.
-
----
-*Generated automatically on $(date)*
-EOF
+          echo "# $FOLDER" > README.md
+          echo "" >> README.md
+          echo "This is the source repository for the $FOLDER submodule." >> README.md
+          echo "" >> README.md
+          echo "## Contents" >> README.md
+          echo "This repository contains the source code for the $FOLDER component that is included as a submodule in the main project." >> README.md
+          echo "" >> README.md
+          echo "## Usage" >> README.md
+          echo "This submodule is automatically managed by the main repository's workflow system." >> README.md
+          echo "" >> README.md
+          echo "---" >> README.md
+          echo "*Generated automatically on $(date)*" >> README.md
         fi
         
         # Configure git
