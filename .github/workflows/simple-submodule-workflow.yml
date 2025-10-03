@@ -122,14 +122,29 @@ jobs:
     - name: Verify folder exists
       run: |
         FOLDER="${{ steps.meta.outputs.folder_name }}"
-        echo "🔍 Checking if folder $FOLDER exists..."
+        FOLDER=$(printf '%s' "$FOLDER" | sed -e 's/^[[:space:]]\+//' -e 's/[[:space:]]\+$//')
+        echo "🔍 Checking if folder '$FOLDER' exists..."
+        echo "📊 Folder name length: ${#FOLDER}"
+        echo "📊 Folder name bytes: $(echo -n "$FOLDER" | xxd)"
         
-        if [ ! -d "$FOLDER" ]; then
-          echo "❌ ERROR: Folder '$FOLDER' not found in workspace"
+        # Check if folder exists as directory or submodule
+        if [ -d "$FOLDER" ]; then
+          echo "✅ Found folder: $FOLDER"
+          ls -la "$FOLDER"
+        elif [ -f "$FOLDER" ]; then
+          echo "⚠️  Found file (not directory): $FOLDER"
+          ls -la "$FOLDER"
+        else
+          echo "❌ Folder '$FOLDER' not found"
           echo "📁 Available directories:"
           ls -la
           echo "📂 Contents of root:"
           find . -maxdepth 2 -type d | head -20
+          
+          # Try to find similar folder names
+          echo "🔍 Looking for similar folder names..."
+          find . -maxdepth 1 -type d -name "*$(echo "$FOLDER" | cut -c1-5)*" 2>/dev/null || echo "No similar folders found"
+          
           exit 1
         fi
         
@@ -329,13 +344,21 @@ jobs:
           rm -rf "$FOLDER" || echo "Folder not found or already removed"
         }
         
-        # Add as submodule
+        # Add as submodule (use clean URL without token)
         echo "➕ Adding submodule tracking branch '$BRANCH_NAME'..."
-        git submodule add -b "$BRANCH_NAME" "$REPO_URL" "$FOLDER" || {
+        CLEAN_REPO_URL="https://github.com/$NEW_REPO.git"
+        
+        # Configure git to use token for submodule operations
+        git config url."https://${{ secrets.ORG_ADMIN_TOKEN || github.token }}@github.com/".insteadOf "https://github.com/"
+        
+        git submodule add -b "$BRANCH_NAME" "$CLEAN_REPO_URL" "$FOLDER" || {
           echo "❌ Failed to add submodule"
           git status
           exit 1
         }
+        
+        # Reset git config to avoid token in .gitmodules
+        git config --unset url."https://${{ secrets.ORG_ADMIN_TOKEN || github.token }}@github.com/".insteadOf
         
         echo "✅ Submodule added successfully"
         
