@@ -83,7 +83,20 @@ jobs:
         cd repo
         
         # Copy folder content from the original repository
-        cp -r "$GITHUB_WORKSPACE/$FOLDER"/* .
+        # Handle both empty and non-empty folders
+        if [ -d "$GITHUB_WORKSPACE/$FOLDER" ]; then
+          # Copy all contents (including hidden files)
+          cp -r "$GITHUB_WORKSPACE/$FOLDER"/. . 2>/dev/null || true
+          # If folder is empty, create a placeholder
+          if [ ! "$(ls -A .)" ]; then
+            echo "# $FOLDER" > README.md
+            echo "This is the source repository for $FOLDER submodule." >> README.md
+          fi
+        else
+          echo "Warning: Folder $FOLDER not found, creating placeholder"
+          echo "# $FOLDER" > README.md
+          echo "This is the source repository for $FOLDER submodule." >> README.md
+        fi
         
         # Configure git
         git config user.name "${{ github.actor }}"
