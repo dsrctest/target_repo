@@ -2,7 +2,7 @@ name: Simple Submodule Workflow
 
 on:
   pull_request:
-    types: [closed]
+    types: [opened, closed]
     branches: [main]
   workflow_dispatch:
     inputs:
@@ -22,7 +22,7 @@ permissions:
 
 jobs:
   convert-to-submodule:
-    if: github.event_name == 'workflow_dispatch' || (github.event.pull_request.merged == true)
+    if: github.event_name == 'workflow_dispatch' || (github.event_name == 'pull_request' && github.event.pull_request.merged == true)
     runs-on: ubuntu-latest
     
     steps:
