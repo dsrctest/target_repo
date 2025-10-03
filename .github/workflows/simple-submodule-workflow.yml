@@ -386,12 +386,23 @@ jobs:
         echo "📋 Git status:"
         git status
         
+        # Pull latest changes to avoid conflicts
+        echo "🔄 Pulling latest changes from remote..."
+        git pull origin main --no-edit || {
+          echo "⚠️  Pull failed, but continuing with force push..."
+        }
+        
         # Push changes
+        echo "🚀 Pushing changes to remote..."
         git push origin main || {
-          echo "❌ Push failed, showing git configuration:"
-          git config --list | grep -E "(user|remote)"
-          git remote -v
-          exit 1
+          echo "❌ Standard push failed, trying force push..."
+          git push --force-with-lease origin main || {
+            echo "❌ Force push also failed, showing git configuration:"
+            git config --list | grep -E "(user|remote)"
+            git remote -v
+            git log --oneline -5
+            exit 1
+          }
         }
         
         echo "✅ Successfully pushed all changes"
