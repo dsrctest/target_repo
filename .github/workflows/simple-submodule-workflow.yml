@@ -183,6 +183,8 @@ jobs:
         
         echo "🏗️ STEP 1: Creating new repository '$NEW_REPO' in organization"
         echo "📋 Repository will be created as: $NEW_REPO"
+        echo "📊 Repository name length: ${#NEW_REPO}"
+        echo "📊 Repository name bytes: $(echo -n "$NEW_REPO" | xxd)"
         
         # Check if repository already exists
         if gh repo view "$NEW_REPO" >/dev/null 2>&1; then
@@ -198,7 +200,7 @@ jobs:
           if gh repo create "$NEW_REPO" \
             --private \
             --description "$DESCRIPTION" \
-            --confirm; then
+            --yes; then
             
             echo "✅ Successfully created repository: $NEW_REPO"
             
@@ -206,16 +208,32 @@ jobs:
             echo "⏳ Waiting for repository initialization..."
             sleep 15
             
-            # Verify repository was created successfully
-            if gh repo view "$NEW_REPO" >/dev/null 2>&1; then
-              echo "✅ Repository $NEW_REPO fully initialized and ready"
-              echo "🔗 Repository URL: https://github.com/$NEW_REPO"
-            else
-              echo "❌ Failed to verify repository creation"
-              echo "🔍 Attempting repository view for debugging..."
-              gh repo view "$NEW_REPO" || echo "Repository not accessible"
-              exit 1
-            fi
+            # Verify repository was created successfully with retry logic
+            echo "🔍 Verifying repository creation..."
+            MAX_RETRIES=3
+            RETRY_COUNT=0
+            
+            while [ $RETRY_COUNT -lt $MAX_RETRIES ]; do
+              if gh repo view "$NEW_REPO" >/dev/null 2>&1; then
+                echo "✅ Repository $NEW_REPO fully initialized and ready"
+                echo "🔗 Repository URL: https://github.com/$NEW_REPO"
+                break
+              else
+                RETRY_COUNT=$((RETRY_COUNT + 1))
+                echo "⚠️  Verification attempt $RETRY_COUNT/$MAX_RETRIES failed"
+                if [ $RETRY_COUNT -lt $MAX_RETRIES ]; then
+                  echo "⏳ Waiting 10 seconds before retry..."
+                  sleep 10
+                else
+                  echo "❌ Failed to verify repository creation after $MAX_RETRIES attempts"
+                  echo "🔍 Attempting repository view for debugging..."
+                  gh repo view "$NEW_REPO" || echo "Repository not accessible"
+                  echo "🔍 Checking if repository exists with different name..."
+                  gh repo list --limit 10 | grep -i "$(echo "$NEW_REPO" | cut -d'/' -f2)" || echo "No similar repositories found"
+                  exit 1
+                fi
+              fi
+            done
           else
             echo "❌ Failed to create repository: $NEW_REPO"
             echo "🔍 Debug: Checking organization access..."
