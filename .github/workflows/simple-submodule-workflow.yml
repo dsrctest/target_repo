@@ -45,6 +45,11 @@ jobs:
           FOLDER_NAME="${{ inputs.folder_name }}"
           NEW_REPO="${{ inputs.new_repo }}"
           ORG_NAME=$(echo "$NEW_REPO" | cut -d'/' -f1)
+          # Trim whitespace
+          FOLDER_NAME=$(echo "$FOLDER_NAME" | xargs)
+          ORG_NAME=$(echo "$ORG_NAME" | xargs)
+          # Recompute NEW_REPO after trim
+          NEW_REPO="$ORG_NAME/$FOLDER_NAME"
           echo "📝 Manual trigger: $FOLDER_NAME -> $NEW_REPO"
         else
           # PR merge - extract from PR body
@@ -88,6 +93,9 @@ jobs:
           if [ -z "$ORG_NAME" ]; then
             ORG_NAME="dsrctest"
           fi
+          # Trim whitespace from extracted values
+          FOLDER_NAME=$(echo "$FOLDER_NAME" | xargs)
+          ORG_NAME=$(echo "$ORG_NAME" | xargs)
           
           NEW_REPO="$ORG_NAME/$FOLDER_NAME"
           
@@ -118,7 +126,9 @@ jobs:
 
     - name: Verify folder exists
       run: |
+        # Trim any accidental whitespace in folder name
         FOLDER="${{ steps.meta.outputs.folder_name }}"
+        FOLDER=$(echo "$FOLDER" | xargs)
         echo "🔍 Checking if folder $FOLDER exists..."
         
         if [ ! -d "$FOLDER" ]; then
@@ -207,8 +217,11 @@ jobs:
       env:
         GH_TOKEN: ${{ secrets.ORG_ADMIN_TOKEN || secrets.GITHUB_TOKEN }}
       run: |
+        # Trim any accidental whitespace in folder name
         FOLDER="${{ steps.meta.outputs.folder_name }}"
+        FOLDER=$(echo "$FOLDER" | xargs)
         NEW_REPO="${{ steps.meta.outputs.new_repo }}"
+        NEW_REPO=$(echo "$NEW_REPO" | xargs)
         
         echo "📂 STEP 2: Pushing all files from local folder '$FOLDER' to new repository '$NEW_REPO'"
         echo "📁 Source folder: $FOLDER"
@@ -279,8 +292,11 @@ jobs:
       env:
         GH_TOKEN: ${{ secrets.ORG_ADMIN_TOKEN || secrets.GITHUB_TOKEN }}
       run: |
+        # Trim any accidental whitespace in folder name
         FOLDER="${{ steps.meta.outputs.folder_name }}"
+        FOLDER=$(echo "$FOLDER" | xargs)
         NEW_REPO="${{ steps.meta.outputs.new_repo }}"
+        NEW_REPO=$(echo "$NEW_REPO" | xargs)
         REPO_URL="https://${{ secrets.ORG_ADMIN_TOKEN || secrets.GITHUB_TOKEN }}@github.com/$NEW_REPO.git"
         
         echo "🔗 STEP 3: Converting original folder '$FOLDER' to submodule"
