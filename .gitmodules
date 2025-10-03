@@ -1,3 +1,6 @@
 [submodule "deepcraft_092"]
 	path = deepcraft_092
 	url = https://github.com/BannariPaviOwn/deepcraft_092-source.git
+[submodule "test_file10008"]
+	path = test_file10008
+	url = https://github.com/dsrctest/test_file10008.git
