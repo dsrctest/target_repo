@@ -1,18 +1,3 @@
-[submodule "deepcraft44"]
-	path = deepcraft44
-	url = https://github.com/dsrctest/deepcraft44-source.git
-[submodule "deepcraft46"]
-	path = deepcraft46
-	url = https://github.com/dsrctest/deepcraft46-source.git
-[submodule "deepcraft47"]
-	path = deepcraft47
-	url = https://github.com/dsrctest/deepcraft47-source.git
-[submodule "deepcraftpsco_edge"]
-	path = deepcraftpsco_edge
-	url = https://github.com/dsrctest/deepcraftpsco_edge-source.git
-[submodule "deepcraftpsco_edge11"]
-	path = deepcraftpsco_edge11
-	url = https://github.com/dsrctest/deepcraftpsco_edge11-source.git
-[submodule "deepcraftpsco_edge_001"]
-	path = deepcraftpsco_edge_001
-	url = https://github.com/dsrctest/deepcraftpsco_edge_001-source.git
+[submodule "deepcraftpsco_edge_53"]
+	path = deepcraftpsco_edge_53
+	url = https://github.com/BannariPaviOwn/deepcraftpsco_edge_53-source.git
