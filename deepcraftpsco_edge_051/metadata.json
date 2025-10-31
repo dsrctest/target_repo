@@ -1,0 +1,35 @@
+{
+  "title": "TestProject_No_1",
+  "description": "This is a test project to test the functionality",
+  "long_description": "This is a test project to test the functionality",
+  "sensors": [
+    "Camera",
+    "Microphone",
+    "Ambient Light"
+  ],
+  "domain": [
+    "IoT"
+  ],
+  "application": [
+    "Industrial IoT"
+  ],
+  "use_case": [
+    "Classification"
+  ],
+  "kit": [
+    "PSOC™ Edge Eval Kit"
+  ],
+  "device": [
+    "ARM Cortex-M"
+  ],
+  "thumbnail_image_id": "",
+  "main_image_id": "",
+  "brand_image_id": "",
+  "links": [
+    {
+      "label": "Website",
+      "url": "deepcraft.infineon.com"
+    }
+  ],
+  "metrics": []
+}
