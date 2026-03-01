@@ -1,4 +1,4 @@
-﻿# Anomaly Detection for Vibrating Machinery - Starter Model Project
+﻿# Anomaly Detection for Vibrating Machinery - Starter Model Project (Test)
 
 ## Use-case description
 
